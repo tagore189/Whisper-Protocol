@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "expo-crypto": "^15.0.8",
+    "expo-secure-store": "^15.0.8",
+    "tweetnacl": "^1.0.3"
+  }
+}
