@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { type Href, useRouter } from "expo-router";
 import { useEffect } from "react";
 import {
   Dimensions,
@@ -89,7 +89,7 @@ export default function IdentityGenerationScreen() {
       <View style={styles.footer}>
         <Pressable
           style={styles.primaryBtn}
-          onPress={() => router.push("/radar")}
+          onPress={() => router.push("/radar" as Href)}
         >
           <Text style={styles.primaryText}>Continue Securely</Text>
         </Pressable>

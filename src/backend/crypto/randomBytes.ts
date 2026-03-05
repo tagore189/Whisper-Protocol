@@ -6,7 +6,12 @@ export async function getSecureRandomBytes(size: number): Promise<Uint8Array> {
     getRandomBytesAsync?: (count: number) => Promise<Uint8Array>;
   };
   if (typeof randomModule.getRandomBytesAsync === 'function') {
-    return randomModule.getRandomBytesAsync(size);
+    try {
+      return await randomModule.getRandomBytesAsync(size);
+    } catch {
+      // expo-random can be present while its native module is unavailable.
+      // Fall through to other secure providers.
+    }
   }
 
   const cryptoModule = Crypto as unknown as {
@@ -14,10 +19,18 @@ export async function getSecureRandomBytes(size: number): Promise<Uint8Array> {
     getRandomBytes?: (count: number) => Uint8Array;
   };
   if (typeof cryptoModule.getRandomBytesAsync === 'function') {
-    return cryptoModule.getRandomBytesAsync(size);
+    try {
+      return await cryptoModule.getRandomBytesAsync(size);
+    } catch {
+      // Fall through to sync/web fallbacks.
+    }
   }
   if (typeof cryptoModule.getRandomBytes === 'function') {
-    return cryptoModule.getRandomBytes(size);
+    try {
+      return cryptoModule.getRandomBytes(size);
+    } catch {
+      // Fall through to web fallback.
+    }
   }
 
   const webCrypto = (globalThis as unknown as { crypto?: Crypto }).crypto as

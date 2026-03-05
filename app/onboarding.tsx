@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, Pressable, Dimensions } from "react-native";
 import { MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
-import {useRouter} from 'expo-router';
+import { type Href, useRouter } from "expo-router";
 
 const { width } = Dimensions.get("window");
 
@@ -60,7 +60,7 @@ export default function OnboardingScreen() {
       {/* Footer */}
       <View style={styles.footer}>
         <Pressable style={styles.primaryBtn}
-        onPress={() => router.push("/idgen")}>
+        onPress={() => router.push("/idgen" as Href)}>
           <MaterialIcons name="fingerprint" size={22} color="#fff" />
           <Text style={styles.primaryText}>
             Generate Secure Identity

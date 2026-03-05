@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { type Href, useRouter } from 'expo-router';
 import { getOrCreateIdentity } from '../../src/backend/identity/identity';
 import { Node, startScanning, stopScanning } from '../../src/backend/ble/scan';
 
@@ -66,7 +66,7 @@ export default function MeshVisualizationScreen() {
 
   const onConnect = useCallback(
     (peerId: string) => {
-      router.push({ pathname: '/chatroom', params: { peerId } });
+      router.push((`/chatroom?peerId=${encodeURIComponent(peerId)}` as Href));
     },
     [router]
   );

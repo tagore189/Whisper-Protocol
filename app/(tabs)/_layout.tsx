@@ -20,7 +20,7 @@ export default function TabsLayout() {
         name="mesh"
         options={{
           title: "Mesh",
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color }: { color: string }) => (
             <MaterialIcons name="hub" size={22} color={color} />
           ),
         }}
@@ -30,7 +30,7 @@ export default function TabsLayout() {
         name="meshchat"
         options={{
           title: "Chats",
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color }: { color: string }) => (
             <MaterialIcons name="chat-bubble" size={22} color={color} />
           ),
         }}
@@ -40,7 +40,7 @@ export default function TabsLayout() {
         name="settings"
         options={{
           title: "Settings",
-          tabBarIcon: ({ color }) => (
+          tabBarIcon: ({ color }: { color: string }) => (
             <MaterialIcons name="settings" size={22} color={color} />
           ),
         }}

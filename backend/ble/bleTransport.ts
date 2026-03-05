@@ -2,7 +2,7 @@ import { Buffer } from "buffer";
 import { MeshPacket } from "../mesh/packet";
 import { MeshTransport } from "../mesh/router";
 import { getBleManager } from "./bleManager";
-import { CHAR_UUID, SERVICE_UUID } from "./types";
+import { HANDSHAKE_CHAR_UUID, SERVICE_UUID } from "./types";
 
 export class BleTransport implements MeshTransport {
   async sendPacket(packet: MeshPacket): Promise<void> {
@@ -17,7 +17,7 @@ export class BleTransport implements MeshTransport {
         try {
           await device.writeCharacteristicWithResponseForService(
             SERVICE_UUID,
-            CHAR_UUID,
+            HANDSHAKE_CHAR_UUID,
             data
           );
         } catch {

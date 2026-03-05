@@ -1,4 +1,4 @@
-import { getBleManager, SERVICE_ID } from './bleManager';
+import { getBleManager } from './bleManager';
 import { Device } from 'react-native-ble-plx';
 import { PermissionsAndroid, Platform } from 'react-native';
 
@@ -10,6 +10,8 @@ export interface Node {
 
 const nodes = new Map<string, Node>();
 let scanning = false;
+let pruneTimer: ReturnType<typeof setInterval> | null = null;
+const NODE_STALE_MS = 8000;
 
 async function requestScanPermissions(): Promise<boolean> {
   if (Platform.OS !== 'android') {
@@ -52,7 +54,7 @@ export async function startScanning(onNodeFound: (nodes: Node[]) => void): Promi
 
   scanning = true;
   nodes.clear();
-  bleManager.startDeviceScan([SERVICE_ID], null, (err: Error | null, device: Device | null) => {
+  bleManager.startDeviceScan(null, { allowDuplicates: true }, (err: Error | null, device: Device | null) => {
     if (err) {
       console.error('BLE scan error:', err);
       return;
@@ -67,6 +69,20 @@ export async function startScanning(onNodeFound: (nodes: Node[]) => void): Promi
 
     onNodeFound([...nodes.values()]);
   });
+
+  pruneTimer = setInterval(() => {
+    const now = Date.now();
+    let changed = false;
+    for (const [id, node] of nodes) {
+      if (now - node.lastSeen > NODE_STALE_MS) {
+        nodes.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      onNodeFound([...nodes.values()]);
+    }
+  }, 2000);
 
   return true;
 }
@@ -83,5 +99,10 @@ export function stopScanning() {
   }
 
   bleManager.stopDeviceScan();
+  if (pruneTimer) {
+    clearInterval(pruneTimer);
+    pruneTimer = null;
+  }
+  nodes.clear();
   scanning = false;
 }

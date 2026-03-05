@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { type Href, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -44,11 +44,18 @@ export default function DeviceDiscoveryScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const isWeb = Platform.OS === "web";
+  const seenDevicesRef = useRef<Map<string, { device: Device; lastSeen: number }>>(
+    new Map(),
+  );
+
+  const deviceCount = devices.length;
+  const sortedDevices = useMemo(
+    () => [...devices].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)),
+    [devices],
+  );
 
   useEffect(() => {
     if (isWeb) return;
-
-    let mounted = true;
 
     (async () => {
       try {
@@ -59,7 +66,6 @@ export default function DeviceDiscoveryScreen() {
     })();
 
     return () => {
-      mounted = false;
       bleService.stopScan();
     };
   }, [isWeb]);
@@ -67,22 +73,48 @@ export default function DeviceDiscoveryScreen() {
   const startScan = useCallback(() => {
     if (isWeb) return;
 
+    seenDevicesRef.current.clear();
     setDevices([]);
     setIsScanning(true);
     setError(null);
 
     bleService.startScan((device) => {
+      seenDevicesRef.current.set(device.id, { device, lastSeen: Date.now() });
       setDevices((prev) => {
-        if (prev.find((d) => d.id === device.id)) return prev;
-        return [...prev, device];
+        const index = prev.findIndex((d) => d.id === device.id);
+        if (index === -1) return [...prev, device];
+        const next = [...prev];
+        next[index] = device;
+        return next;
       });
     });
   }, [isWeb]);
 
   const stopScan = useCallback(() => {
     bleService.stopScan();
+    seenDevicesRef.current.clear();
+    setDevices([]);
     setIsScanning(false);
   }, []);
+
+  useEffect(() => {
+    if (!isScanning) return;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const staleMs = 8000;
+      let changed = false;
+      for (const [id, record] of seenDevicesRef.current) {
+        if (now - record.lastSeen > staleMs) {
+          seenDevicesRef.current.delete(id);
+          changed = true;
+        }
+      }
+      if (changed) {
+        setDevices(Array.from(seenDevicesRef.current.values()).map((r) => r.device));
+      }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [isScanning]);
 
   const handleScanPress = useCallback(() => {
     isScanning ? stopScan() : startScan();
@@ -92,7 +124,7 @@ export default function DeviceDiscoveryScreen() {
     async (device: Device) => {
       try {
         await device.connect();
-        router.replace("/(tabs)/mesh");
+        router.replace("/(tabs)/mesh" as Href);
       } catch (e) {
         console.error("Connect failed", e);
       }
@@ -139,8 +171,8 @@ export default function DeviceDiscoveryScreen() {
             />
           </View>
 
-          {devices.length > 0 && <View style={styles.ping1} />}
-          {devices.length > 1 && <View style={styles.ping2} />}
+          {deviceCount > 0 && <View style={styles.ping1} />}
+          {deviceCount > 1 && <View style={styles.ping2} />}
         </View>
 
         <View style={styles.radarText}>
@@ -152,7 +184,7 @@ export default function DeviceDiscoveryScreen() {
                 : "Tap sync to scan"}
           </Text>
           <Text style={styles.radarSub}>
-            {devices.length} device{devices.length !== 1 ? "s" : ""} found
+            {deviceCount} device{deviceCount !== 1 ? "s" : ""} found
           </Text>
         </View>
       </View>
@@ -172,12 +204,12 @@ export default function DeviceDiscoveryScreen() {
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>Discovered Devices</Text>
           <View style={styles.countBadge}>
-            <Text style={styles.countText}>{devices.length} FOUND</Text>
+            <Text style={styles.countText}>{deviceCount} FOUND</Text>
           </View>
         </View>
 
         <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-          {devices.length === 0 && !isScanning && !isWeb && (
+          {deviceCount === 0 && !isScanning && !isWeb && (
             <View style={styles.empty}>
               <Text style={styles.emptyText}>
                 No devices found. Make sure Bluetooth & Location are enabled.
@@ -185,7 +217,7 @@ export default function DeviceDiscoveryScreen() {
             </View>
           )}
 
-          {devices.map((device) => (
+          {sortedDevices.map((device) => (
             <DeviceCard
               key={device.id}
               name={device.name || `Device ${device.id.slice(-8)}`}

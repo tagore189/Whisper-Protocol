@@ -18,7 +18,10 @@ class BleService {
   startScan(onDevice: (device: Device) => void) {
     if (!this.manager) return;
 
-    this.manager.startDeviceScan(null, null, (error, device) => {
+    this.manager.startDeviceScan(
+      null,
+      { allowDuplicates: true },
+      (error, device) => {
       if (error || !device) return;
       onDevice(device);
     });

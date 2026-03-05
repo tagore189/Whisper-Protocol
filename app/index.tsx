@@ -5,7 +5,7 @@ import {
   StyleSheet,
   Dimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { type Href, useRouter } from "expo-router";
 import { BlurView } from "expo-blur";
 import { MaterialIcons } from "@expo/vector-icons";
 
@@ -17,7 +17,7 @@ export default function SplashScreen() {
   // Simulate boot → navigate next
   useEffect(() => {
     const t = setTimeout(() => {
-      router.replace("/onboarding");
+      router.replace("/onboarding" as Href);
     }, 2200);
 
     return () => clearTimeout(t);

@@ -20,8 +20,6 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-<<<<<<< HEAD
-=======
       "permissions": [
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
@@ -29,7 +27,6 @@
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.ACCESS_FINE_LOCATION"
       ],
->>>>>>> 3e4de0d81a2f8e59c8e6098113d5edf1e75e77c1
       "package": "com.anonymous.MyApp"
     },
     "web": {
@@ -54,7 +51,7 @@
       "expo-secure-store"
     ],
     "experiments": {
-      "typedRoutes": true,
+      "typedRoutes": false,
       "reactCompiler": true
     }
   }
