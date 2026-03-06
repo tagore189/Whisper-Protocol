@@ -3,18 +3,19 @@ import { BlurView } from "expo-blur";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 import { BleTransport } from "../backend/ble/bleTransport";
 import { getOrCreateIdentity } from "../backend/identity/identity";
 import type { MeshPacket } from "../backend/mesh/packet";
 import { MeshRouter } from "../backend/mesh/router";
 import { getMessagesWithPeer, saveMessage } from "../backend/msg/chatStore";
+import { UltrasonicTransport } from "../backend/ultrasonic/ultrasonicTransport";
 import { useBleConnections } from "../contexts/BleConnectionContext";
 
 function formatTime(ts: number): string {
@@ -31,6 +32,7 @@ export default function ChatRoomScreen() {
     peerName: string;
   }>();
   const { isConnected } = useBleConnections();
+  const { settings } = useTransportSettings();
 
   const [messages, setMessages] = useState<MeshPacket[]>([]);
   const [myId, setMyId] = useState<string | null>(null);
@@ -53,6 +55,29 @@ export default function ChatRoomScreen() {
     load();
   }, [load]);
 
+  // when ultrasonic transport is enabled we need to listen for incoming
+  // packets so that the UI can update with messages from the other side.
+  useEffect(() => {
+    if (!myId || !peerId) return;
+    if (!settings.useUltrasonic) return;
+
+    const transport = new UltrasonicTransport();
+    transport.setOnReceive(async (packet) => {
+      if (packet.type === "TEXT") {
+        // store and show packet only if it involves the current peer
+        const other = packet.from === myId ? packet.to : packet.from;
+        if (other === peerId) {
+          await saveMessage(packet);
+          setMessages((prev) => [...prev, packet]);
+        }
+      }
+    });
+
+    // we don't tear down the transport here – it'll be garbage-collected when
+    // the screen unmounts.  A real implementation would probably share one
+    // transport instance for the whole app.
+  }, [settings.useUltrasonic, myId, peerId]);
+
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || !myId || !peerId || sending) return;
@@ -61,7 +86,10 @@ export default function ChatRoomScreen() {
     setInput("");
     setSending(true);
 
-    const transport = new BleTransport();
+    // pick transport based on settings
+    const transport = settings.useUltrasonic
+      ? new UltrasonicTransport()
+      : new BleTransport();
     const meshRouter = new MeshRouter(myId, transport);
     const packet = meshRouter.createPacket(peerId, "TEXT", { text });
 
@@ -71,10 +99,10 @@ export default function ChatRoomScreen() {
     try {
       await transport.sendPacket(packet);
     } catch {
-      // Message saved locally; BLE send is best-effort
+      // best-effort
     }
     setSending(false);
-  }, [input, myId, peerId, connected, sending]);
+  }, [input, myId, peerId, connected, sending, settings.useUltrasonic]);
 
   const goBack = useCallback(() => router.back(), [router]);
 

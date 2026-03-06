@@ -1,15 +1,53 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  TouchableOpacity,
-} from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
+import React, { useEffect, useState } from "react";
+import {
+    Dimensions,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { getOrCreateIdentity } from "../backend/identity/identity";
+import { MeshRouter } from "../backend/mesh/router";
+import { ultrasonicManager } from "../backend/ultrasonic/ultrasonicManager";
+import { UltrasonicTransport } from "../backend/ultrasonic/ultrasonicTransport";
+import { useTransportSettings } from "../contexts/TransportSettingsContext";
 
 const { width } = Dimensions.get("window");
 
 export default function UltrasonicTransferScreen() {
+  const { settings } = useTransportSettings();
+  const [progressPct, setProgressPct] = useState(0);
+  const [transferring, setTransferring] = useState(false);
+
+  useEffect(() => {
+    if (settings.useUltrasonic) {
+      ultrasonicManager.startListening().catch(() => {});
+    }
+
+    return () => {
+      ultrasonicManager.stopListening().catch(() => {});
+    };
+  }, [settings.useUltrasonic]);
+
+  const startTransfer = async () => {
+    if (!settings.useUltrasonic) return;
+    setTransferring(true);
+
+    const idObj = await getOrCreateIdentity();
+    const transport = new UltrasonicTransport();
+    const router = new MeshRouter(idObj.id, transport);
+
+    const totalChunks = 10;
+    for (let i = 0; i < totalChunks; i++) {
+      const packet = router.createPacket("*", "ULTRASONIC", { chunk: i });
+      await transport.sendPacket(packet);
+      setProgressPct(((i + 1) / totalChunks) * 100);
+    }
+
+    setTransferring(false);
+  };
+
   return (
     <View style={styles.root}>
       {/* Concentric Pulse Rings */}
@@ -103,23 +141,27 @@ export default function UltrasonicTransferScreen() {
 
         {/* Progress */}
         <View style={styles.progressTrack}>
-          <View style={styles.progressFill} />
+          <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
         </View>
 
         <View style={styles.progressMeta}>
           <Text style={styles.progressText}>
-            Transferred 2.4 MB
+            Transferred {Math.round((progressPct/100)*2.4*10)/10} MB
           </Text>
           <Text style={styles.progressPct}>
-            64% COMPLETE
+            {Math.round(progressPct)}% COMPLETE
           </Text>
         </View>
 
         {/* Actions */}
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.cancelBtn}>
+          <TouchableOpacity
+            style={[styles.cancelBtn, transferring && styles.cancelBtnDisabled]}
+            onPress={startTransfer}
+            disabled={transferring}
+          >
             <Text style={styles.cancelText}>
-              Cancel Transfer
+              {transferring ? "Transferring..." : "Start Transfer"}
             </Text>
           </TouchableOpacity>
 

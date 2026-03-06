@@ -1,14 +1,17 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Switch,
-  Pressable,
-} from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
+import {
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    View,
+} from "react-native";
+import { useTransportSettings } from "../contexts/TransportSettingsContext";
 
 export default function SettingsScreen() {
+  const { settings, setSettings } = useTransportSettings();
+
   return (
     <View style={styles.root}>
       {/* Top Bar */}
@@ -80,7 +83,10 @@ export default function SettingsScreen() {
             icon="surround-sound"
             label="Ultrasonic Audio"
             description="Encrypted transmission via 18kHz+ audio."
-            value
+            value={settings.useUltrasonic}
+            onValueChange={(v: boolean) => {
+              setSettings({ ...settings, useUltrasonic: v });
+            }}
           />
         </Section>
 
