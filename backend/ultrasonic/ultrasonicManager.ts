@@ -2,7 +2,10 @@ import { EventEmitter } from "events";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
 import { MeshPacket } from "../mesh/packet";
-import { decodeSamples, encodePacket } from "./codec";
+import { decodeSamples, encodePacket, float32ToWav } from "./codec";
+
+const SAMPLE_RATE = 22050;
+const CARRIER_FREQ = 20000; // 20kHz carrier for voice
 
 /**
  * UltrasonicManager handles playing and recording of ultrasonic data.  The
@@ -12,7 +15,9 @@ import { decodeSamples, encodePacket } from "./codec";
  */
 class UltrasonicManager {
   private emitter = new EventEmitter();
-  private recording: Audio.Recording | null = null;
+  private voiceRecording: Audio.Recording | null = null;
+  private voiceTransmitting = false;
+  private voiceReceiving = false;
   private processing = false;
 
   constructor() {
@@ -29,6 +34,13 @@ class UltrasonicManager {
   }
 
   /**
+   * register a callback for incoming voice audio data (raw Float32Array samples)
+   */
+  onVoiceData(cb: (samples: Float32Array) => void) {
+    this.emitter.on("voiceData", cb);
+  }
+
+  /**
    * Encode and play a packet.  The encode step returns a WAV file as a
    * base64 string; expo-av accepts data URI input.
    */
@@ -41,7 +53,7 @@ class UltrasonicManager {
     const { sound } = await Audio.Sound.createAsync({ uri });
 
     sound.setOnPlaybackStatusUpdate((status) => {
-      if (status.didJustFinish) {
+      if (status.isLoaded && status.didJustFinish) {
         // if we "hear" our own packet we push it back through the emitter.
         // when two physical devices exchange audio the recording/processing
         // path below will cause the peer to emit the packet instead.
@@ -59,17 +71,15 @@ class UltrasonicManager {
    * relatively expensive so we only run it once per second for now.
    */
   async startListening() {
-    if (this.recording) return;
+    if (this.voiceRecording) return;
 
     try {
       const { status } = await Audio.requestPermissionsAsync();
       if (!status.granted) throw new Error("microphone permission denied");
 
-      this.recording = new Audio.Recording();
-      await this.recording.prepareToRecordAsync(
-        Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY
-      );
-      await this.recording.startAsync();
+      this.voiceRecording = new Audio.Recording();
+      await this.voiceRecording.prepareToRecordAsync();
+      await this.voiceRecording.startAsync();
 
       // schedule processing loop
       this.processing = true;
@@ -80,34 +90,173 @@ class UltrasonicManager {
   }
 
   async stopListening() {
-    if (!this.recording) return;
+    if (!this.voiceRecording) return;
     this.processing = false;
     try {
-      await this.recording.stopAndUnloadAsync();
+      await this.voiceRecording.stopAndUnloadAsync();
     } catch {}
-    this.recording = null;
+    this.voiceRecording = null;
+  }
+
+  /**
+   * Start voice transmission: capture mic, modulate to ultrasonic, play continuously
+   */
+  async startVoiceTransmission() {
+    if (this.voiceTransmitting) return;
+
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (!status.granted) throw new Error("microphone permission denied");
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      this.voiceRecording = new Audio.Recording();
+      await this.voiceRecording.prepareToRecordAsync();
+      await this.voiceRecording.startAsync();
+
+      this.voiceTransmitting = true;
+      this.voiceTransmitLoop();
+    } catch (e) {
+      console.warn("ultrasonic: failed to start voice transmission", e);
+    }
+  }
+
+  /**
+   * Stop voice transmission
+   */
+  async stopVoiceTransmission() {
+    if (!this.voiceTransmitting) return;
+    this.voiceTransmitting = false;
+    if (this.voiceRecording) {
+      try {
+        await this.voiceRecording.stopAndUnloadAsync();
+      } catch {}
+      this.voiceRecording = null;
+    }
+  }
+
+  /**
+   * Start voice reception: record ultrasonic, demodulate, emit voice data
+   */
+  async startVoiceReception() {
+    if (this.voiceReceiving) return;
+
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      this.voiceRecording = new Audio.Recording();
+      await this.voiceRecording.prepareToRecordAsync();
+      await this.voiceRecording.startAsync();
+
+      this.voiceReceiving = true;
+      this.voiceReceiveLoop();
+    } catch (e) {
+      console.warn("ultrasonic: failed to start voice reception", e);
+    }
+  }
+
+  /**
+   * Stop voice reception
+   */
+  async stopVoiceReception() {
+    if (!this.voiceReceiving) return;
+    this.voiceReceiving = false;
+    if (this.voiceRecording) {
+      try {
+        await this.voiceRecording.stopAndUnloadAsync();
+      } catch {}
+      this.voiceRecording = null;
+    }
   }
 
   private async processLoop() {
-    while (this.processing && this.recording) {
-      await new Promise((r) => setTimeout(r, 1000));
+    while (this.processing && this.voiceRecording) {
+      await new Promise(r => setTimeout(r, 1000)); // Process every second
+
       try {
-        const uri = this.recording.getURI();
+        const uri = this.voiceRecording.getURI();
         if (!uri) continue;
 
-        // read file as base64 so we can get raw samples
-        const b64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const raw = base64ToFloat32Array(b64);
-        const packet = decodeSamples(raw);
+        const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+        const samples = base64ToFloat32Array(b64);
+
+        // Try to decode ultrasonic packets
+        const packet = decodeSamples(samples);
         if (packet) {
           this.emitter.emit("packet", packet);
         }
       } catch (e) {
-        console.warn("ultrasonic: processing error", e);
+        console.warn("ultrasonic processing error", e);
       }
     }
+  }
+
+  private async voiceTransmitLoop() {
+    while (this.voiceTransmitting && this.voiceRecording) {
+      await new Promise(r => setTimeout(r, 100)); // 10Hz chunks
+
+      try {
+        const uri = this.voiceRecording.getURI();
+        if (!uri) continue;
+
+        const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+        const voiceSamples = base64ToFloat32Array(b64);
+
+        // modulate voice to ultrasonic carrier
+        const modulated = modulateVoiceToUltrasonic(voiceSamples);
+
+        // play modulated audio
+        await this.playModulatedAudio(modulated);
+      } catch (e) {
+        console.warn("voice transmit error", e);
+      }
+    }
+  }
+
+  private async voiceReceiveLoop() {
+    while (this.voiceReceiving && this.voiceRecording) {
+      await new Promise(r => setTimeout(r, 100));
+
+      try {
+        const uri = this.voiceRecording.getURI();
+        if (!uri) continue;
+
+        const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+        const ultrasonicSamples = base64ToFloat32Array(b64);
+
+        // demodulate ultrasonic to voice
+        const voiceSamples = demodulateUltrasonicToVoice(ultrasonicSamples);
+
+        // emit voice data
+        this.emitter.emit("voiceData", voiceSamples);
+      } catch (e) {
+        console.warn("voice receive error", e);
+      }
+    }
+  }
+
+  private async playModulatedAudio(samples: Float32Array) {
+    // convert to WAV and play
+    const wav = float32ToWav(samples, SAMPLE_RATE);
+    const uri = `data:audio/wav;base64,${wav}`;
+
+    const { sound } = await Audio.Sound.createAsync({ uri });
+    await sound.playAsync();
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (status.isLoaded && status.didJustFinish) {
+        sound.unloadAsync().catch(() => {});
+      }
+    });
   }
 }
 
@@ -137,4 +286,38 @@ function base64ToFloat32Array(b64: string): Float32Array {
     samples[i] = val > 0x7fff ? (val - 0x10000) / 0x8000 : val / 0x7fff;
   }
   return samples;
+}
+
+/**
+ * Modulate voice samples to ultrasonic carrier using AM modulation
+ */
+function modulateVoiceToUltrasonic(voiceSamples: Float32Array): Float32Array {
+  const modulated = new Float32Array(voiceSamples.length);
+  for (let i = 0; i < voiceSamples.length; i++) {
+    const t = i / SAMPLE_RATE;
+    const carrier = Math.sin(2 * Math.PI * CARRIER_FREQ * t);
+    modulated[i] = voiceSamples[i] * carrier; // AM modulation
+  }
+  return modulated;
+}
+
+/**
+ * Demodulate ultrasonic samples back to voice using envelope detection
+ */
+function demodulateUltrasonicToVoice(ultrasonicSamples: Float32Array): Float32Array {
+  // simple envelope detection for AM demodulation
+  const voice = new Float32Array(ultrasonicSamples.length);
+  for (let i = 0; i < ultrasonicSamples.length; i++) {
+    voice[i] = Math.abs(ultrasonicSamples[i]); // rectify
+  }
+  // low-pass filter to remove carrier (simple moving average)
+  const windowSize = Math.floor(SAMPLE_RATE / CARRIER_FREQ);
+  for (let i = windowSize; i < voice.length; i++) {
+    let sum = 0;
+    for (let j = 0; j < windowSize; j++) {
+      sum += voice[i - j];
+    }
+    voice[i] = sum / windowSize;
+  }
+  return voice;
 }

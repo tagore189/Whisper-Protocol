@@ -1,22 +1,25 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
+import { Audio } from "expo-av";
 import { BlurView } from "expo-blur";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 import { BleTransport } from "../backend/ble/bleTransport";
 import { getOrCreateIdentity } from "../backend/identity/identity";
 import type { MeshPacket } from "../backend/mesh/packet";
 import { MeshRouter } from "../backend/mesh/router";
 import { getMessagesWithPeer, saveMessage } from "../backend/msg/chatStore";
+import { ultrasonicManager } from "../backend/ultrasonic/ultrasonicManager";
 import { UltrasonicTransport } from "../backend/ultrasonic/ultrasonicTransport";
 import { useBleConnections } from "../contexts/BleConnectionContext";
+import { useTransportSettings } from "../contexts/TransportSettingsContext";
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], {
@@ -38,6 +41,7 @@ export default function ChatRoomScreen() {
   const [myId, setMyId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [voiceCallActive, setVoiceCallActive] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const connected = peerId ? isConnected(peerId) : false;
@@ -102,9 +106,41 @@ export default function ChatRoomScreen() {
       // best-effort
     }
     setSending(false);
-  }, [input, myId, peerId, connected, sending, settings.useUltrasonic]);
+  }, [myId, peerId, connected, settings.useUltrasonic, input, sending]);
 
   const goBack = useCallback(() => router.back(), [router]);
+
+  const startVoiceCall = useCallback(async () => {
+    if (!settings.useUltrasonic) return;
+    setVoiceCallActive(true);
+    // start transmission and reception
+    await ultrasonicManager.startVoiceTransmission();
+    await ultrasonicManager.startVoiceReception();
+  }, [settings.useUltrasonic]);
+
+  const stopVoiceCall = useCallback(async () => {
+    setVoiceCallActive(false);
+    await ultrasonicManager.stopVoiceTransmission();
+    await ultrasonicManager.stopVoiceReception();
+  }, []);
+
+  // set up voice data handler to play received audio
+  useEffect(() => {
+    const handleVoiceData = async (samples: Float32Array) => {
+      // convert samples to WAV and play
+      const wav = float32ToWav(samples, 22050);
+      const uri = `data:audio/wav;base64,${wav}`;
+      const { sound } = await Audio.Sound.createAsync({ uri });
+      await sound.playAsync();
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sound.unloadAsync().catch(() => {});
+        }
+      });
+    };
+
+    ultrasonicManager.onVoiceData(handleVoiceData);
+  }, []);
 
   if (!peerId) {
     return (
@@ -141,7 +177,21 @@ export default function ChatRoomScreen() {
           </View>
         </View>
 
-        <MaterialIcons name="more-horiz" size={22} color="#908dce" />
+        <View style={styles.headerRight}>
+          {settings.useUltrasonic && (
+            <Pressable
+              style={[styles.voiceBtn, voiceCallActive && styles.voiceBtnActive]}
+              onPress={voiceCallActive ? stopVoiceCall : startVoiceCall}
+            >
+              <MaterialIcons
+                name={voiceCallActive ? "call-end" : "call"}
+                size={20}
+                color={voiceCallActive ? "#ef4444" : "#fff"}
+              />
+            </Pressable>
+          )}
+          <MaterialIcons name="more-horiz" size={22} color="#908dce" />
+        </View>
       </BlurView>
 
       {!connected && (
@@ -251,6 +301,22 @@ const styles = StyleSheet.create({
   headerCenter: {
     flex: 1,
     alignItems: "center",
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  voiceBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#6961ff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceBtnActive: {
+    backgroundColor: "#ef4444",
   },
   title: {
     color: "#fff",
@@ -405,3 +471,44 @@ const styles = StyleSheet.create({
     color: "#aaa",
   },
 });
+
+// helper to convert Float32Array to WAV base64
+function float32ToWav(input: Float32Array, sampleRate: number): string {
+  const buffer = new ArrayBuffer(44 + input.length * 2);
+  const view = new DataView(buffer);
+
+  /* RIFF identifier */ writeString(view, 0, "RIFF");
+  /* file length */ view.setUint32(4, 36 + input.length * 2, true);
+  /* RIFF type */ writeString(view, 8, "WAVE");
+  /* format chunk identifier */ writeString(view, 12, "fmt ");
+  /* format chunk length */ view.setUint32(16, 16, true);
+  /* sample format (raw) */ view.setUint16(20, 1, true);
+  /* channel count */ view.setUint16(22, 1, true);
+  /* sample rate */ view.setUint32(24, sampleRate, true);
+  /* byte rate (sampleRate * blockAlign) */ view.setUint32(28, sampleRate * 2, true);
+  /* block align (channelCount * bytesPerSample) */ view.setUint16(32, 2, true);
+  /* bits per sample */ view.setUint16(34, 16, true);
+  /* data chunk identifier */ writeString(view, 36, "data");
+  /* data chunk length */ view.setUint32(40, input.length * 2, true);
+
+  // write the PCM samples
+  let offset = 44;
+  for (let i = 0; i < input.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+
+  // return base64 string of the WAV file
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function writeString(view: DataView, offset: number, str: string) {
+  for (let i = 0; i < str.length; i++) {
+    view.setUint8(offset + i, str.charCodeAt(i));
+  }
+}

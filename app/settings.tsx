@@ -1,11 +1,11 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
 } from "react-native";
 import { useTransportSettings } from "../contexts/TransportSettingsContext";
 
@@ -176,12 +176,14 @@ function Row({
   description,
   value,
   disabled,
+  onValueChange,
 }: {
   icon: any;
   label: string;
   description?: string;
   value?: boolean;
   disabled?: boolean;
+  onValueChange?: (value: boolean) => void;
 }) {
   return (
     <View style={styles.row}>
@@ -209,6 +211,7 @@ function Row({
       <Switch
         value={!!value}
         disabled={disabled}
+        onValueChange={onValueChange}
         trackColor={{
           false: "#374151",
           true: "#6961ff",

@@ -91,7 +91,7 @@ export function decodeSamples(raw: Float32Array): MeshPacket | null {
 }
 
 // helper to wrap a Float32Array of samples in a WAV container
-function float32ToWav(input: Float32Array, sampleRate: number): string {
+export function float32ToWav(input: Float32Array, sampleRate: number): string {
   const buffer = new ArrayBuffer(44 + input.length * 2);
   const view = new DataView(buffer);
 

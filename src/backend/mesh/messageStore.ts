@@ -29,7 +29,7 @@ class ReactNativeMessageStore {
   private conversations: Map<string, ConversationThread> = new Map();
   private pendingMessages: Message[] = [];
   private deliveredMessages: Set<string> = new Set();
-  private listeners: Array<(store: MessageStore) => void> = [];
+  private listeners: ((store: MessageStore) => void)[] = [];
 
   /**
    * Initialize the message store from persistent storage

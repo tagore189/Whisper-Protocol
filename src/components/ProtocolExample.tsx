@@ -5,20 +5,16 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  Button,
-  FlatList,
-  TextInput,
-  ActivityIndicator,
-  StyleSheet,
-  ScrollView,
+    ActivityIndicator,
+    Button,
+    FlatList,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { useProtocol } from '../hooks/useProtocol';
-
-interface ExampleComponentProps {
-  // Optional props
-}
 
 export function ProtocolExampleComponent() {
   const {

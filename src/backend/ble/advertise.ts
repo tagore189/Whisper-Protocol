@@ -1,7 +1,6 @@
-import { getBleManager, SERVICE_ID, CHAR_ID } from './bleManager';
-import { Device, Characteristic } from 'react-native-ble-plx';
-import { Platform, PermissionsAndroid } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 import { getOrCreateIdentity } from '../identity/identity';
+import { getBleManager, SERVICE_ID } from './bleManager';
 
 interface AdvertiserState {
   isAdvertising: boolean;
@@ -64,15 +63,6 @@ export async function startAdvertising(): Promise<boolean> {
     }
 
     const identity = await getOrCreateIdentity();
-
-    // Prepare advertising data
-    const advertisingData = {
-      serviceUUIDs: [SERVICE_ID],
-      manufacturerData: {
-        // Using manufacturer ID for generic data
-        data: Buffer.from(identity.nodeId, 'hex'),
-      },
-    };
 
     // Start advertising (native implementation handles the actual advertising)
     // For now, we'll simulate the advertising by keeping track of state

@@ -2,16 +2,13 @@ import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { type Href, useRouter } from "expo-router";
 import { useEffect } from "react";
 import {
-  Dimensions,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import { getOrCreateIdentity } from "../backend/identity/identity";
-
-const { width } = Dimensions.get("window");
 
 export default function IdentityGenerationScreen() {
   const router = useRouter();

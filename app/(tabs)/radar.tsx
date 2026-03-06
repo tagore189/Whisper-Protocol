@@ -2,14 +2,14 @@ import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { type Href, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Dimensions,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 import type { Device } from "react-native-ble-plx";
 import { bleService } from "../../backend/ble/bleService";
@@ -117,7 +117,11 @@ export default function DeviceDiscoveryScreen() {
   }, [isScanning]);
 
   const handleScanPress = useCallback(() => {
-    isScanning ? stopScan() : startScan();
+    if (isScanning) {
+      stopScan();
+    } else {
+      startScan();
+    }
   }, [isScanning, startScan, stopScan]);
 
   const handleConnect = useCallback(

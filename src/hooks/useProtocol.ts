@@ -2,17 +2,17 @@
  * React Native Hooks for APP SIGNAL PROTOCOL Backend Integration
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { getOrCreateIdentity } from '../backend/identity/identity';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { startAdvertising, stopAdvertising } from '../backend/ble/advertise';
 import { startScanning, stopScanning } from '../backend/ble/scan';
-import { startAdvertising, stopAdvertising, isAdvertising } from '../backend/ble/advertise';
-import { getOrCreateKeyPair, rotateKeys } from '../backend/crypto/keyManager';
 import {
-  encryptMessage,
-  decryptMessage,
-  hashData,
+    decryptMessage,
+    encryptMessage,
+    hashData,
 } from '../backend/crypto/encrypt';
-import { messageStore, initializeMessageStore } from '../backend/mesh/messageStore';
+import { getOrCreateKeyPair, rotateKeys } from '../backend/crypto/keyManager';
+import { getOrCreateIdentity } from '../backend/identity/identity';
+import { initializeMessageStore, messageStore } from '../backend/mesh/messageStore';
 import { createPacket } from '../backend/mesh/packet';
 
 interface Identity {
@@ -284,7 +284,6 @@ export function useMessageStore() {
  * Hook for mesh routing and packet handling
  */
 export function useMeshNetworking() {
-  const { keyPair } = useCryptoKeys();
   const { addMessage } = useMessageStore();
 
   const createAndSendPacket = useCallback(

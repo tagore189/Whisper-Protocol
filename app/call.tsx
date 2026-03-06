@@ -383,6 +383,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 24,
   },
+  cancelBtnDisabled: {
+    opacity: 0.5,
+  },
   cancelText: {
     color: "rgba(255,255,255,0.6)",
     fontWeight: "600",
