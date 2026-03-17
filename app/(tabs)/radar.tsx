@@ -1,22 +1,21 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { type Href, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo } from "react";
 import {
-    ActivityIndicator,
-    Dimensions,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Dimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
 } from "react-native";
-import type { Device } from "react-native-ble-plx";
 import { bleService } from "../../backend/ble/bleService";
 
-const { width } = Dimensions.get("window");
+import { useBleScan } from "../../backend/ble/useBleScan";
 
-/* ---------- Helpers ---------- */
+const { width } = Dimensions.get("window");
 
 function rssiToSignal(rssi: number | null): "Strong" | "Medium" | "Weak" {
   if (rssi == null) return "Medium";
@@ -38,83 +37,16 @@ function rssiToDistance(rssi: number | null): string {
 
 export default function DeviceDiscoveryScreen() {
   const router = useRouter();
-
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const isWeb = Platform.OS === "web";
-  const seenDevicesRef = useRef<Map<string, { device: Device; lastSeen: number }>>(
-    new Map(),
-  );
+
+  // Use robust scanning hook
+  const { devices, isScanning, error, startScan, stopScan } = useBleScan();
 
   const deviceCount = devices.length;
   const sortedDevices = useMemo(
     () => [...devices].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)),
     [devices],
   );
-
-  useEffect(() => {
-    if (isWeb) return;
-
-    (async () => {
-      try {
-        await bleService.init();
-      } catch (e: any) {
-        setError(e.message ?? "Bluetooth permission error");
-      }
-    })();
-
-    return () => {
-      bleService.stopScan();
-    };
-  }, [isWeb]);
-
-  const startScan = useCallback(() => {
-    if (isWeb) return;
-
-    seenDevicesRef.current.clear();
-    setDevices([]);
-    setIsScanning(true);
-    setError(null);
-
-    bleService.startScan((device) => {
-      seenDevicesRef.current.set(device.id, { device, lastSeen: Date.now() });
-      setDevices((prev) => {
-        const index = prev.findIndex((d) => d.id === device.id);
-        if (index === -1) return [...prev, device];
-        const next = [...prev];
-        next[index] = device;
-        return next;
-      });
-    });
-  }, [isWeb]);
-
-  const stopScan = useCallback(() => {
-    bleService.stopScan();
-    seenDevicesRef.current.clear();
-    setDevices([]);
-    setIsScanning(false);
-  }, []);
-
-  useEffect(() => {
-    if (!isScanning) return;
-    const timer = setInterval(() => {
-      const now = Date.now();
-      const staleMs = 8000;
-      let changed = false;
-      for (const [id, record] of seenDevicesRef.current) {
-        if (now - record.lastSeen > staleMs) {
-          seenDevicesRef.current.delete(id);
-          changed = true;
-        }
-      }
-      if (changed) {
-        setDevices(Array.from(seenDevicesRef.current.values()).map((r) => r.device));
-      }
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [isScanning]);
 
   const handleScanPress = useCallback(() => {
     if (isScanning) {
@@ -125,9 +57,9 @@ export default function DeviceDiscoveryScreen() {
   }, [isScanning, startScan, stopScan]);
 
   const handleConnect = useCallback(
-    async (device: Device) => {
+    async (device: any) => {
       try {
-        await device.connect();
+        await bleService.connect(device);
         router.replace("/(tabs)/mesh" as Href);
       } catch (e) {
         console.error("Connect failed", e);
@@ -224,7 +156,7 @@ export default function DeviceDiscoveryScreen() {
           {sortedDevices.map((device) => (
             <DeviceCard
               key={device.id}
-              name={device.name || `Device ${device.id.slice(-8)}`}
+              name={device.name || `Device ${device.id.slice(-8)} `}
               distance={rssiToDistance(device.rssi)}
               signal={rssiToSignal(device.rssi)}
               onConnect={() => handleConnect(device)}

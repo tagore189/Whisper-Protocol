@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { type Href, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useBleScan } from '../../backend/ble/useBleScan';
 import { getOrCreateIdentity } from '../../src/backend/identity/identity';
-import { Node, startScanning, stopScanning } from '../../src/backend/ble/scan';
 
 function formatNodeLabel(nodeId: string): string {
   if (nodeId.length <= 12) {
@@ -15,25 +15,9 @@ function formatNodeLabel(nodeId: string): string {
 export default function MeshVisualizationScreen() {
   const router = useRouter();
   const [myId, setMyId] = useState<string>('');
-  const [nodes, setNodes] = useState<Node[]>([]);
-  const [scanning, setScanning] = useState<boolean>(false);
-  const [scanError, setScanError] = useState<string>('');
 
-  const startScan = useCallback(async () => {
-    setScanError('');
-    const started = await startScanning((discoveredNodes) => {
-      setNodes(discoveredNodes);
-    });
-    setScanning(started);
-    if (!started) {
-      setScanError('Scanning could not start. Check BLE permissions and adapter state.');
-    }
-  }, []);
-
-  const stopScan = useCallback(() => {
-    stopScanning();
-    setScanning(false);
-  }, []);
+  // Use the robust scanner hook
+  const { devices: nodes, isScanning: scanning, error: scanError, startScan, stopScan } = useBleScan();
 
   useEffect(() => {
     let mounted = true;
@@ -47,17 +31,13 @@ export default function MeshVisualizationScreen() {
         console.error('Failed to load identity:', error);
       });
 
-    startScan().catch((error) => {
-      console.error('Failed to start scan:', error);
-      setScanning(false);
-      setScanError('Failed to start scanning.');
-    });
+    // We do not auto-start scan anymore to adhere to user intent. Start Scan button will trigger startScan().
 
     return () => {
       mounted = false;
       stopScan();
     };
-  }, [startScan, stopScan]);
+  }, [stopScan]);
 
   const sortedNodes = useMemo(
     () => [...nodes].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)),
@@ -114,7 +94,7 @@ export default function MeshVisualizationScreen() {
               <View>
                 <Text style={styles.nodeId}>{formatNodeLabel(node.id)}</Text>
                 <Text style={styles.nodeMeta}>
-                  RSSI {node.rssi ?? 'N/A'} | seen {new Date(node.lastSeen).toLocaleTimeString()}
+                  RSSI {node.rssi ?? 'N/A'}
                 </Text>
               </View>
             </View>

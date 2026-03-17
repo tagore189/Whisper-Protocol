@@ -1,4 +1,3 @@
-import { EventEmitter } from "events";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system";
 import { MeshPacket } from "../mesh/packet";
@@ -6,6 +5,23 @@ import { decodeSamples, encodePacket, float32ToWav } from "./codec";
 
 const SAMPLE_RATE = 22050;
 const CARRIER_FREQ = 20000; // 20kHz carrier for voice
+
+class EventEmitter {
+  private listeners: { [event: string]: Function[] } = {};
+
+  on(event: string, listener: Function) {
+    if (!this.listeners[event]) {
+      this.listeners[event] = [];
+    }
+    this.listeners[event].push(listener);
+  }
+
+  emit(event: string, ...args: any[]) {
+    if (this.listeners[event]) {
+      this.listeners[event].forEach((listener) => listener(...args));
+    }
+  }
+}
 
 /**
  * UltrasonicManager handles playing and recording of ultrasonic data.  The
