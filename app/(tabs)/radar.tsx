@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { type Href, useRouter } from "expo-router";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -12,7 +12,6 @@ import {
   View
 } from "react-native";
 import { bleService } from "../../backend/ble/bleService";
-
 import { useBleScan } from "../../backend/ble/useBleScan";
 
 const { width } = Dimensions.get("window");
@@ -33,6 +32,20 @@ function rssiToDistance(rssi: number | null): string {
   return d < 1 ? `${d}m` : d <= 99 ? `${Math.round(d)}m` : "99m+";
 }
 
+function timeAgo(ts: number): string {
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 2) return "just now";
+  if (diff < 60) return `${diff}s ago`;
+  return `${Math.floor(diff / 60)}m ago`;
+}
+
+function signalColor(rssi: number | null): string {
+  if (rssi == null) return "#9ca3af";
+  if (rssi >= -60) return "#22c55e";
+  if (rssi >= -75) return "#eab308";
+  return "#ef4444";
+}
+
 /* ---------- Screen ---------- */
 
 export default function DeviceDiscoveryScreen() {
@@ -41,6 +54,16 @@ export default function DeviceDiscoveryScreen() {
 
   // Use robust scanning hook
   const { devices, isScanning, error, startScan, stopScan } = useBleScan();
+
+  // Auto-start scanning on mount
+  useEffect(() => {
+    if (!isWeb) {
+      startScan();
+    }
+    return () => {
+      stopScan();
+    };
+  }, []);
 
   const deviceCount = devices.length;
   const sortedDevices = useMemo(
@@ -107,8 +130,11 @@ export default function DeviceDiscoveryScreen() {
             />
           </View>
 
+          {/* Show up to 4 ping dots for discovered devices */}
           {deviceCount > 0 && <View style={styles.ping1} />}
           {deviceCount > 1 && <View style={styles.ping2} />}
+          {deviceCount > 2 && <View style={styles.ping3} />}
+          {deviceCount > 3 && <View style={styles.ping4} />}
         </View>
 
         <View style={styles.radarText}>
@@ -153,12 +179,24 @@ export default function DeviceDiscoveryScreen() {
             </View>
           )}
 
+          {deviceCount === 0 && isScanning && (
+            <View style={styles.empty}>
+              <ActivityIndicator size="small" color="#6961ff" />
+              <Text style={[styles.emptyText, { marginTop: 8 }]}>
+                Looking for devices...
+              </Text>
+            </View>
+          )}
+
           {sortedDevices.map((device) => (
             <DeviceCard
               key={device.id}
               name={device.name || `Device ${device.id.slice(-8)} `}
               distance={rssiToDistance(device.rssi)}
               signal={rssiToSignal(device.rssi)}
+              signalColor={signalColor(device.rssi)}
+              lastSeen={timeAgo(device.lastSeen)}
+              rssi={device.rssi}
               onConnect={() => handleConnect(device)}
             />
           ))}
@@ -174,11 +212,17 @@ function DeviceCard({
   name,
   distance,
   signal,
+  signalColor: sigColor,
+  lastSeen,
+  rssi,
   onConnect,
 }: {
   name: string;
   distance: string;
   signal: string;
+  signalColor: string;
+  lastSeen: string;
+  rssi: number | null;
   onConnect: () => void;
 }) {
   return (
@@ -193,8 +237,22 @@ function DeviceCard({
         </Text>
         <View style={styles.metaRow}>
           <Text style={styles.meta}>📏 {distance}</Text>
-          <Text style={styles.meta}>📶 {signal}</Text>
+          <Text style={[styles.meta, { color: sigColor }]}>📶 {signal}</Text>
+          <Text style={styles.meta}>⏱ {lastSeen}</Text>
         </View>
+        {rssi != null && (
+          <View style={styles.rssiBar}>
+            <View
+              style={[
+                styles.rssiFill,
+                {
+                  width: `${Math.min(100, Math.max(5, ((rssi + 100) / 60) * 100))}%`,
+                  backgroundColor: sigColor,
+                },
+              ]}
+            />
+          </View>
+        )}
       </View>
 
       <Pressable style={styles.connectBtn} onPress={onConnect}>
@@ -204,7 +262,7 @@ function DeviceCard({
   );
 }
 
-/* ---------- Styles (UNCHANGED) ---------- */
+/* ---------- Styles ---------- */
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#100f23" },
@@ -290,6 +348,24 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "#00f5ff",
   },
+  ping3: {
+    position: "absolute",
+    top: 60,
+    left: 55,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#00f5ff",
+  },
+  ping4: {
+    position: "absolute",
+    bottom: 60,
+    right: 45,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#00f5ff",
+  },
   radarText: { marginTop: 32, alignItems: "center" },
   radarTitle: { fontSize: 20, fontWeight: "700", color: "#fff" },
   radarSub: { fontSize: 14, color: "#9ca3af", marginTop: 4 },
@@ -356,6 +432,17 @@ const styles = StyleSheet.create({
   name: { color: "#fff", fontWeight: "700" },
   metaRow: { flexDirection: "row", gap: 12, marginTop: 4 },
   meta: { fontSize: 12, color: "#9ca3af" },
+  rssiBar: {
+    marginTop: 6,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    overflow: "hidden",
+  },
+  rssiFill: {
+    height: "100%",
+    borderRadius: 2,
+  },
   connectBtn: {
     backgroundColor: "#6961ff",
     paddingHorizontal: 12,
@@ -363,4 +450,4 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   connectText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-}); 
+});

@@ -1,0 +1,14 @@
+# Ignore Android build artifacts
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/build/
+android/*.log
+
+# Ignore iOS build artifacts
+ios/Pods/
+ios/build/
+
+# Ignore other large/unnecessary files
+.expo/
+node_modules/

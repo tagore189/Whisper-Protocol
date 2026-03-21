@@ -11,6 +11,7 @@ export async function requestBlePermissions(): Promise<boolean> {
   if (Platform.Version >= 31) {
     permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
     permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
+    permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE);
   }
 
   const results = await PermissionsAndroid.requestMultiple(permissions);

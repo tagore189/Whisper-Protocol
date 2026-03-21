@@ -12,6 +12,20 @@ function formatNodeLabel(nodeId: string): string {
   return `${nodeId.slice(0, 6)}...${nodeId.slice(-4)}`;
 }
 
+function rssiToSignal(rssi: number | null): { label: string; color: string } {
+  if (rssi == null) return { label: 'Unknown', color: '#9ca3af' };
+  if (rssi >= -60) return { label: 'Strong', color: '#22c55e' };
+  if (rssi >= -75) return { label: 'Medium', color: '#eab308' };
+  return { label: 'Weak', color: '#ef4444' };
+}
+
+function timeAgo(ts: number): string {
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 2) return 'just now';
+  if (diff < 60) return `${diff}s ago`;
+  return `${Math.floor(diff / 60)}m ago`;
+}
+
 export default function MeshVisualizationScreen() {
   const router = useRouter();
   const [myId, setMyId] = useState<string>('');
@@ -30,8 +44,6 @@ export default function MeshVisualizationScreen() {
       .catch((error) => {
         console.error('Failed to load identity:', error);
       });
-
-    // We do not auto-start scan anymore to adhere to user intent. Start Scan button will trigger startScan().
 
     return () => {
       mounted = false;
@@ -87,24 +99,53 @@ export default function MeshVisualizationScreen() {
       </View>
 
       <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-        {sortedNodes.map((node) => (
-          <View key={node.id} style={styles.row}>
-            <View style={styles.rowLeft}>
-              <MaterialIcons name="devices" size={18} color="#6961ff" />
-              <View>
-                <Text style={styles.nodeId}>{formatNodeLabel(node.id)}</Text>
-                <Text style={styles.nodeMeta}>
-                  RSSI {node.rssi ?? 'N/A'}
-                </Text>
+        {sortedNodes.map((node) => {
+          const signal = rssiToSignal(node.rssi);
+          return (
+            <View key={node.id} style={styles.row}>
+              <View style={styles.rowLeft}>
+                <View style={styles.deviceIcon}>
+                  <MaterialIcons name="devices" size={18} color="#6961ff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.nodeName} numberOfLines={1}>{node.name}</Text>
+                  <Text style={styles.nodeId}>{formatNodeLabel(node.id)}</Text>
+                  <View style={styles.metaRow}>
+                    <Text style={styles.nodeMeta}>
+                      RSSI {node.rssi ?? 'N/A'}
+                    </Text>
+                    <Text style={[styles.signalBadge, { color: signal.color }]}>
+                      📶 {signal.label}
+                    </Text>
+                    <Text style={styles.nodeMeta}>
+                      ⏱ {timeAgo(node.lastSeen)}
+                    </Text>
+                  </View>
+                  {node.rssi != null && (
+                    <View style={styles.rssiBar}>
+                      <View
+                        style={[
+                          styles.rssiFill,
+                          {
+                            width: `${Math.min(100, Math.max(5, ((node.rssi + 100) / 60) * 100))}%`,
+                            backgroundColor: signal.color,
+                          },
+                        ]}
+                      />
+                    </View>
+                  )}
+                </View>
               </View>
+              <Pressable style={styles.connectBtn} onPress={() => onConnect(node.id)}>
+                <Text style={styles.connectText}>Chat</Text>
+              </Pressable>
             </View>
-            <Pressable style={styles.connectBtn} onPress={() => onConnect(node.id)}>
-              <Text style={styles.connectText}>Chat</Text>
-            </Pressable>
-          </View>
-        ))}
+          );
+        })}
         {!sortedNodes.length ? (
-          <Text style={styles.emptyText}>No nearby devices found yet.</Text>
+          <Text style={styles.emptyText}>
+            {scanning ? 'Looking for nearby devices...' : 'No nearby devices found yet.'}
+          </Text>
         ) : null}
       </ScrollView>
     </View>
@@ -244,15 +285,47 @@ const styles = StyleSheet.create({
     gap: 10,
     flex: 1,
   },
-  nodeId: {
+  deviceIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(105,97,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nodeName: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  nodeId: {
+    color: '#6961ff',
+    fontSize: 11,
+    marginTop: 1,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
   },
   nodeMeta: {
     color: '#9ca3af',
     fontSize: 11,
-    marginTop: 2,
+  },
+  signalBadge: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  rssiBar: {
+    marginTop: 4,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  rssiFill: {
+    height: '100%',
+    borderRadius: 2,
   },
   connectBtn: {
     backgroundColor: 'rgba(105,97,255,0.2)',
