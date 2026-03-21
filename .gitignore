@@ -39,3 +39,8 @@ app-example
 # generated native folders
 /ios
 /android
+
+# local AI models / huge hidden dirs
+.zencoder/
+.zenflow/
+
