@@ -1,5 +1,4 @@
-import { BleManager, Device } from "react-native-ble-plx";
-import { Platform } from "react-native";
+import { Device } from "react-native-ble-plx";
 import { getOrCreateIdentity } from "../../backend/identity/identity";
 
 import { getBleManager } from "./bleManager";
@@ -17,9 +16,9 @@ class BleService {
       null,
       { allowDuplicates: true },
       (error, device) => {
-      if (error || !device) return;
-      onDevice(device);
-    });
+        if (error || !device) return;
+        onDevice(device);
+      });
   }
 
   stopScan() {
@@ -50,7 +49,7 @@ class BleService {
       displayName:
         device.name ||
         device.localName ||
-        `Whisper-${connected.id.slice(-6)}`,
+        `FortiLink-${connected.id.slice(-6)}`,
     };
   }
 }

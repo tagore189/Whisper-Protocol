@@ -130,7 +130,7 @@ export default function SettingsScreen() {
           </View>
 
           <Text style={styles.appName}>
-            Whisper Protocol
+            FortiLink
           </Text>
           <Text style={styles.version}>
             v1.0.10.rev-24

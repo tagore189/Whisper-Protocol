@@ -1,5 +1,5 @@
-import { BleManager, Device } from "react-native-ble-plx";
 import { Platform } from "react-native";
+import { BleManager, Device } from "react-native-ble-plx";
 import { getOrCreateIdentity } from "../../backend/identity/identity";
 
 class BleService {
@@ -50,7 +50,7 @@ class BleService {
       whisperName:
         device.name ||
         device.localName ||
-        `Whisper-${connected.id.slice(-6)}`,
+        `FortiLink-${connected.id.slice(-6)}`,
     };
   }
 }

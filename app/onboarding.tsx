@@ -1,6 +1,6 @@
-import { View, Text, StyleSheet, Pressable, Dimensions } from "react-native";
-import { MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { type Href, useRouter } from "expo-router";
+import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 
 const { width } = Dimensions.get("window");
 
@@ -14,7 +14,7 @@ export default function OnboardingScreen() {
           <MaterialIcons name="arrow-back" size={24} color="#fff" />
         </Pressable>
 
-        <Text style={styles.topTitle}>Whisper Protocol</Text>
+        <Text style={styles.topTitle}>FortiLink</Text>
         <View style={{ width: 24 }} />
       </View>
 
@@ -50,7 +50,7 @@ export default function OnboardingScreen() {
         <View style={styles.textBlock}>
           <Text style={styles.title}>Mesh & Ultrasonic</Text>
           <Text style={styles.body}>
-            Stay connected without the internet. Whisper uses BLE mesh and
+            Stay connected without the internet. FortiLink uses BLE mesh and
             high-frequency audio to send encrypted messages directly between
             devices, even in dead zones.
           </Text>
@@ -60,7 +60,7 @@ export default function OnboardingScreen() {
       {/* Footer */}
       <View style={styles.footer}>
         <Pressable style={styles.primaryBtn}
-        onPress={() => router.push("/idgen" as Href)}>
+          onPress={() => router.push("/idgen" as Href)}>
           <MaterialIcons name="fingerprint" size={22} color="#fff" />
           <Text style={styles.primaryText}>
             Generate Secure Identity

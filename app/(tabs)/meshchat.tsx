@@ -1,5 +1,5 @@
 import { MaterialIcons } from "@expo/vector-icons";
-import { type Href, useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -111,7 +111,7 @@ export default function MeshChatScreen() {
               />
               <Text style={styles.emptyTitle}>No devices connected</Text>
               <Text style={styles.emptySub}>
-                Connect to Whisper devices from Device Discovery (radar) to chat
+                Connect to FortiLink devices from Device Discovery (radar) to chat
                 with them here.
               </Text>
               <Pressable

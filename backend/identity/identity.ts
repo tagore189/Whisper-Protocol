@@ -1,5 +1,5 @@
-import * as Crypto from "expo-crypto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Crypto from "expo-crypto";
 
 const IDENTITY_KEY = "WHISPER_IDENTITY";
 
@@ -11,7 +11,7 @@ export type Identity = {
 
 function generateName() {
   const animals = ["Fox", "Otter", "Wolf", "Hawk", "Raven", "Tiger"];
-  return `Whisper-${animals[Math.floor(Math.random() * animals.length)]}`;
+  return `FortiLink-${animals[Math.floor(Math.random() * animals.length)]}`;
 }
 
 export async function getOrCreateIdentity(): Promise<Identity> {

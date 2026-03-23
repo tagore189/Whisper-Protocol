@@ -1,13 +1,13 @@
+import { MaterialIcons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
+import { type Href, useRouter } from "expo-router";
 import { useEffect } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
   Dimensions,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
-import { type Href, useRouter } from "expo-router";
-import { BlurView } from "expo-blur";
-import { MaterialIcons } from "@expo/vector-icons";
 
 const { width } = Dimensions.get("window");
 
@@ -54,7 +54,7 @@ export default function SplashScreen() {
         </View>
 
         {/* Text */}
-        <Text style={styles.title}>Whisper Protocol</Text>
+        <Text style={styles.title}>FortiLink</Text>
         <Text style={styles.subtitle}>
           SECURE • OFFLINE • UNTRACEABLE
         </Text>
