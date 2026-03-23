@@ -58,12 +58,14 @@ export default function DeviceDiscoveryScreen() {
   // Auto-start scanning on mount
   useEffect(() => {
     if (!isWeb) {
-      startScan();
+      bleService.init().then(() => {
+        startScan();
+      }).catch(e => console.error("BLE init error:", e));
     }
     return () => {
       stopScan();
     };
-  }, []);
+  }, [startScan, stopScan]);
 
   const deviceCount = devices.length;
   const sortedDevices = useMemo(

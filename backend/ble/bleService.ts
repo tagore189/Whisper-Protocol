@@ -2,23 +2,18 @@ import { BleManager, Device } from "react-native-ble-plx";
 import { Platform } from "react-native";
 import { getOrCreateIdentity } from "../../backend/identity/identity";
 
+import { getBleManager } from "./bleManager";
+
 class BleService {
-  private manager: BleManager | null = null;
-
   async init() {
-    if (Platform.OS === "web") {
-      throw new Error("Bluetooth not supported on web");
-    }
-
-    if (!this.manager) {
-      this.manager = new BleManager();
-    }
+    // No-op: manager is lazy-loaded via getBleManager()
   }
 
   startScan(onDevice: (device: Device) => void) {
-    if (!this.manager) return;
+    const { bleManager } = getBleManager();
+    if (!bleManager) return;
 
-    this.manager.startDeviceScan(
+    bleManager.startDeviceScan(
       null,
       { allowDuplicates: true },
       (error, device) => {
@@ -28,7 +23,8 @@ class BleService {
   }
 
   stopScan() {
-    this.manager?.stopDeviceScan();
+    const { bleManager } = getBleManager();
+    bleManager?.stopDeviceScan();
   }
 
   /**
@@ -39,7 +35,8 @@ class BleService {
     deviceId: string;
     displayName: string;
   }> {
-    if (!this.manager) {
+    const { bleManager } = getBleManager();
+    if (!bleManager) {
       throw new Error("BLE manager not initialized");
     }
 
