@@ -1,16 +1,36 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useTransportSettings } from "../contexts/TransportSettingsContext";
+import { useAppSettings } from "../contexts/AppSettingsContext";
+import { supabase } from "../src/supabase";
 
 export default function SettingsScreen() {
   const { settings, setSettings } = useTransportSettings();
+  const { settings: appSettings, updateSettings } = useAppSettings();
+
+  const handleClearChatHistory = () => {
+    Alert.alert("Clear Chat History", "Are you sure you want to delete all messages from the Supabase db?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: async () => {
+        try {
+          await supabase.from("messages").delete().or(`sender_device_id.eq.${appSettings.deviceId},receiver_device_id.eq.${appSettings.deviceId}`);
+          Alert.alert("Success", "Chat history cleared.");
+        } catch (e) {
+          Alert.alert("Error", "Failed to clear chat history.");
+        }
+      }},
+    ]);
+  };
+
 
   return (
     <View style={styles.root}>
@@ -60,14 +80,46 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Device Info */}
+        <Section title="Device Identity">
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <View style={styles.rowIcon}>
+                <MaterialIcons name="perm-identity" size={22} color="#6961ff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Device ID</Text>
+                <Text style={styles.rowDesc} selectable>{appSettings.deviceId}</Text>
+              </View>
+            </View>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <View style={styles.rowIcon}>
+                <MaterialIcons name="badge" size={22} color="#6961ff" />
+              </View>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.rowLabel}>Device Name</Text>
+                <TextInput
+                  style={[styles.rowDesc, styles.inputField]}
+                  value={appSettings.deviceName}
+                  onChangeText={(val) => updateSettings({ deviceName: val })}
+                  placeholder="Enter Device Name"
+                  placeholderTextColor="#6b7280"
+                />
+              </View>
+            </View>
+          </View>
+        </Section>
+
         {/* Appearance */}
         <Section title="Appearance">
           <Row
             icon="dark-mode"
             label="Dark Mode"
-            description="High-contrast dark theme is enforced for field operations."
-            disabled
-            value
+            description="Toggle Dark/Light theme"
+            value={appSettings.theme === "dark"}
+            onValueChange={(val) => updateSettings({ theme: val ? "dark" : "light" })}
           />
         </Section>
 
@@ -90,14 +142,34 @@ export default function SettingsScreen() {
           />
         </Section>
 
-        {/* Advanced */}
-        <Section title="Advanced">
+        {/* Notifications & Security */}
+        <Section title="Notifications">
           <Row
-            icon="terminal"
-            label="Debug Mode"
+            icon="notifications"
+            label="Connection Requests"
+            description="Alerts for incoming mesh pairing requests"
+            value={appSettings.connectionRequestsEnabled}
+            onValueChange={(val) => updateSettings({ connectionRequestsEnabled: val })}
           />
+          <Row
+            icon="notifications-active"
+            label="New Messages"
+            description="Alerts for incoming mesh chat messages"
+            value={appSettings.notificationsEnabled}
+            onValueChange={(val) => updateSettings({ notificationsEnabled: val })}
+          />
+        </Section>
 
-          <Pressable style={styles.dangerRow}>
+        <Section title="Privacy & Security">
+          <Row
+            icon="security"
+            label="Require Confirmation"
+            description="Ask before accepting connection requests"
+            value={appSettings.requireConfirmation}
+            onValueChange={(val) => updateSettings({ requireConfirmation: val })}
+          />
+          
+          <Pressable style={styles.dangerRow} onPress={handleClearChatHistory}>
             <View style={styles.rowLeft}>
               <View style={styles.dangerIcon}>
                 <MaterialIcons
@@ -107,7 +179,7 @@ export default function SettingsScreen() {
                 />
               </View>
               <Text style={styles.dangerText}>
-                Purge Message Cache
+                Clear Chat History
               </Text>
             </View>
 
@@ -360,6 +432,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#9ca3af",
     marginTop: 2,
+  },
+  inputField: {
+    color: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(105,97,255,0.4)",
+    paddingVertical: 2,
   },
 
   dangerRow: {

@@ -3,6 +3,7 @@ import { type Href, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   Platform,
   Pressable,
@@ -13,6 +14,8 @@ import {
 } from "react-native";
 import { bleService } from "../../backend/ble/bleService";
 import { useBleScan } from "../../backend/ble/useBleScan";
+import { useAppSettings } from "../../contexts/AppSettingsContext";
+import { supabase } from "../../src/supabase";
 
 const { width } = Dimensions.get("window");
 
@@ -54,6 +57,7 @@ export default function DeviceDiscoveryScreen() {
 
   // Use robust scanning hook
   const { devices, isScanning, error, startScan, stopScan } = useBleScan();
+  const { settings: appSettings } = useAppSettings();
 
   // Auto-start scanning on mount
   useEffect(() => {
@@ -81,16 +85,39 @@ export default function DeviceDiscoveryScreen() {
     }
   }, [isScanning, startScan, stopScan]);
 
-  const handleConnect = useCallback(
-    async (device: any) => {
+  const sendConnectionRequest = async (device: any) => {
+    try {
+      const { error } = await supabase.from('connection_requests').insert({
+        sender_device_id: appSettings.deviceId,
+        receiver_device_id: device.id,
+        status: 'pending'
+      });
+      if (error) throw error;
+      
+      Alert.alert("Connection Request Sent", "Waiting for response...");
+      
       try {
         await bleService.connect(device);
-        router.replace("/(tabs)/mesh" as Href);
-      } catch (e) {
-        console.error("Connect failed", e);
+      } catch (ex) {
+        // BLE might fail but Supabase logic continues
       }
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not send connection request.");
+    }
+  };
+
+  const handleConnect = useCallback(
+    (device: any) => {
+      Alert.alert(
+        "Device Found",
+        `Name: ${device.name}\nID: ${device.id.substring(0, 8)}...`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Connect", onPress: () => sendConnectionRequest(device) }
+        ]
+      );
     },
-    [router],
+    [appSettings.deviceId],
   );
 
   return (
