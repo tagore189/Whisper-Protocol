@@ -1,4 +1,4 @@
-import { MeshPacket } from '../mesh/packet';
+import { MeshPacket } from '../../connection/mesh/packet';
 import { saveMessage } from './chatStore';
 
 export async function onTextMessage(

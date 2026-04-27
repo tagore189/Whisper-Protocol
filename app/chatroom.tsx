@@ -12,9 +12,9 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useBleConnections } from "../contexts/BleConnectionContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
-import { supabase } from "../src/supabase";
+import { useBleConnections } from '../src/connection/BleConnectionContext';
+import { useAppSettings } from '../src/core/AppSettingsContext';
+import { supabase } from '../src/storage/supabase';
 
 function formatTime(ts: string): string {
   if (!ts) return "";

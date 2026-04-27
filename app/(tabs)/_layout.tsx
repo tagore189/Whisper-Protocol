@@ -1,6 +1,6 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { useWhisperAdvertising } from "../../backend/ble/useWhisperAdvertising";
+import { useWhisperAdvertising } from '../../src/discovery/ble/useWhisperAdvertising';
 
 export default function TabsLayout() {
   useWhisperAdvertising({ autoStart: true });

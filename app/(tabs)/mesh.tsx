@@ -2,8 +2,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { type Href, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useBleScan } from '../../backend/ble/useBleScan';
-import { getOrCreateIdentity } from '../../src/backend/identity/identity';
+import { useBleScan } from '../../src/discovery/ble/useBleScan';
+import { getOrCreateIdentity } from '../../src/core/identity_v2/identity';
 
 function formatNodeLabel(nodeId: string): string {
   if (nodeId.length <= 12) {

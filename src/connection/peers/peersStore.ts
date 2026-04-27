@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
 import { BleManager, Device } from "react-native-ble-plx";
-import { getOrCreateIdentity } from "../../backend/identity/identity";
+import { getOrCreateIdentity } from '../../co../../core/identity/identity';
 
 class BleService {
   private manager: BleManager | null = null;

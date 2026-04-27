@@ -10,12 +10,12 @@ import {
   Text,
   View,
 } from "react-native";
-import { getOrCreateIdentity } from "../../backend/identity/identity";
+import { getOrCreateIdentity } from '../../src/core/identity/identity';
 import {
   getConversations,
   type Conversation,
-} from "../../backend/msg/chatStore";
-import { useBleConnections } from "../../contexts/BleConnectionContext";
+} from '../../src/chat/msg/chatStore';
+import { useBleConnections } from '../../src/connection/BleConnectionContext';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);

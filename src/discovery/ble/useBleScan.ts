@@ -12,6 +12,8 @@ export type ScannedDevice = {
 
 const STALE_TIMEOUT_MS = 10_000; // remove devices not seen for 10s
 const CLEANUP_INTERVAL_MS = 3_000; // check for stale devices every 3s
+const SCAN_DURATION_MS = 5_000; // scan for 5 seconds
+const PAUSE_DURATION_MS = 9_000; // pause for 9 seconds between scans
 
 export function useBleScan() {
   const [devices, setDevices] = useState<ScannedDevice[]>([]);
@@ -20,6 +22,8 @@ export function useBleScan() {
 
   const mapRef = useRef<Map<string, ScannedDevice>>(new Map());
   const cleanupTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Periodic cleanup of stale devices
   const startCleanupTimer = useCallback(() => {
@@ -46,7 +50,50 @@ export function useBleScan() {
     }
   }, []);
 
-  const startScan = useCallback(async () => {
+  const performScanCycle = useCallback(async () => {
+    const { bleManager } = getBleManager();
+    if (!bleManager) return;
+
+    try {
+      // Start scanning
+      bleManager.startDeviceScan(null, { allowDuplicates: true }, (err, device) => {
+        if (err) {
+          setError(err.message);
+          return;
+        }
+
+        if (!device) return;
+
+        const entry: ScannedDevice = {
+          id: device.id,
+          name: device.name || device.localName || `Device-${device.id.slice(-4)}`,
+          rssi: device.rssi ?? null,
+          lastSeen: Date.now(),
+        };
+
+        mapRef.current.set(device.id, entry);
+        setDevices([...mapRef.current.values()]);
+      });
+
+      // Stop scanning after SCAN_DURATION_MS
+      scanTimerRef.current = setTimeout(() => {
+        try {
+          bleManager.stopDeviceScan();
+        } catch {
+          // Ignore
+        }
+
+        // Schedule next scan cycle after PAUSE_DURATION_MS
+        pauseTimerRef.current = setTimeout(() => {
+          performScanCycle();
+        }, PAUSE_DURATION_MS);
+      }, SCAN_DURATION_MS);
+    } catch (e: any) {
+      setError(e?.message || "Failed to start BLE scan");
+    }
+  }, []);
+
+  const startPeriodicScan = useCallback(async () => {
     if (Platform.OS === "web") {
       setError("Bluetooth not available on web");
       return;
@@ -84,34 +131,9 @@ export function useBleScan() {
     // Start stale-device cleanup
     startCleanupTimer();
 
-    // Scan for ALL devices (null = no UUID filter), allow duplicates for live RSSI
-    try {
-      bleManager.startDeviceScan(null, { allowDuplicates: true }, (err, device) => {
-        if (err) {
-          setError(err.message);
-          setIsScanning(false);
-          stopCleanupTimer();
-          return;
-        }
-
-        if (!device) return;
-
-        const entry: ScannedDevice = {
-          id: device.id,
-          name: device.name || device.localName || `Device-${device.id.slice(-4)}`,
-          rssi: device.rssi ?? null,
-          lastSeen: Date.now(),
-        };
-
-        mapRef.current.set(device.id, entry);
-        setDevices([...mapRef.current.values()]);
-      });
-    } catch (e: any) {
-      setError(e?.message || "Failed to start BLE scan");
-      setIsScanning(false);
-      stopCleanupTimer();
-    }
-  }, [startCleanupTimer, stopCleanupTimer]);
+    // Start the first scan cycle
+    performScanCycle();
+  }, [startCleanupTimer, performScanCycle]);
 
   const stopScan = useCallback(() => {
     try {
@@ -120,6 +142,17 @@ export function useBleScan() {
     } catch {
       // Ignore — native module may not be available
     }
+    
+    // Clear timers
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+    if (pauseTimerRef.current) {
+      clearTimeout(pauseTimerRef.current);
+      pauseTimerRef.current = null;
+    }
+    
     setIsScanning(false);
     stopCleanupTimer();
   }, [stopCleanupTimer]);
@@ -133,9 +166,18 @@ export function useBleScan() {
       } catch {
         // Ignore
       }
+      
+      // Clear timers
+      if (scanTimerRef.current) {
+        clearTimeout(scanTimerRef.current);
+      }
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current);
+      }
+      
       stopCleanupTimer();
     };
   }, [stopCleanupTimer]);
 
-  return { devices, isScanning, error, startScan, stopScan };
+  return { devices, isScanning, error, startScan: startPeriodicScan, stopScan };
 }

@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { supabase } from "../src/supabase";
+import { supabase } from '../storage/supabase';
 
 export interface AppSettings {
   deviceId: string;

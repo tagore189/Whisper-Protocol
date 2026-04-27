@@ -11,8 +11,8 @@ import {
   TextInput,
   View
 } from "react-native";
-import { useAppSettings } from "../../contexts/AppSettingsContext";
-import { supabase } from "../../src/supabase";
+import { useAppSettings } from '../../src/core/AppSettingsContext';
+import { supabase } from '../../src/storage/supabase';
 
 type DbUser = {
   id: string;

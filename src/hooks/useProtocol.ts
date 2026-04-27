@@ -3,17 +3,17 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { startAdvertising, stopAdvertising } from '../backend/ble/advertise';
-import { startScanning, stopScanning } from '../backend/ble/scan';
+import { startAdvertising, stopAdvertising } from '../discovery/ble_v2/advertise';
+import { startScanning, stopScanning } from '../discovery/ble_v2/scan';
 import {
     decryptMessage,
     encryptMessage,
     hashData,
-} from '../backend/crypto/encrypt';
-import { getOrCreateKeyPair, rotateKeys } from '../backend/crypto/keyManager';
-import { getOrCreateIdentity } from '../backend/identity/identity';
-import { initializeMessageStore, messageStore } from '../backend/mesh/messageStore';
-import { createPacket } from '../backend/mesh/packet';
+} from '../connection/crypto/encrypt';
+import { getOrCreateKeyPair, rotateKeys } from '../connection/crypto/keyManager';
+import { getOrCreateIdentity } from '../core/identity_v2/identity';
+import { initializeMessageStore, messageStore } from '../connection/mesh_v2/messageStore';
+import { createPacket } from '../connection/mesh_v2/packet';
 
 interface Identity {
   nodeId: string;

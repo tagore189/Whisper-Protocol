@@ -1,6 +1,6 @@
 import { Buffer } from "buffer";
-import { MeshPacket } from "../mesh/packet";
-import { MeshTransport } from "../mesh/router";
+import { MeshPacket } from "../../connection/mesh/packet";
+import { MeshTransport } from "../../connection/mesh/router";
 import { getBleManager } from "./bleManager";
 import { HANDSHAKE_CHAR_UUID, SERVICE_UUID } from "./types";
 

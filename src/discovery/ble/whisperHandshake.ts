@@ -1,5 +1,5 @@
 import { Buffer } from "buffer";
-import { getOrCreateIdentity } from "../identity/identity";
+import { getOrCreateIdentity } from "../../core/identity/identity";
 import { SERVICE_UUID, HANDSHAKE_CHAR_UUID } from "./types";
 import type { Device } from "react-native-ble-plx";
 

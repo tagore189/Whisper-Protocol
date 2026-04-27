@@ -9,12 +9,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useTransportSettings } from "../contexts/TransportSettingsContext";
-import { useAppSettings } from "../contexts/AppSettingsContext";
-import { supabase } from "../src/supabase";
+
+import { useAppSettings } from '../src/core/AppSettingsContext';
+import { supabase } from '../src/storage/supabase';
 
 export default function SettingsScreen() {
-  const { settings, setSettings } = useTransportSettings();
+
   const { settings: appSettings, updateSettings } = useAppSettings();
 
   const handleClearChatHistory = () => {
@@ -131,15 +131,7 @@ export default function SettingsScreen() {
             description="Peer-to-peer discovery using Low Energy radio."
             value
           />
-          <Row
-            icon="surround-sound"
-            label="Ultrasonic Audio"
-            description="Encrypted transmission via 18kHz+ audio."
-            value={settings.useUltrasonic}
-            onValueChange={(v: boolean) => {
-              setSettings({ ...settings, useUltrasonic: v });
-            }}
-          />
+
         </Section>
 
         {/* Notifications & Security */}

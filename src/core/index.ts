@@ -3,11 +3,11 @@
  * React Native Compatible Implementation
  */
 
-import { getOrCreateIdentity } from './identity/identity';
-import { startScanning, stopScanning } from './ble/scan';
-import { startAdvertising, stopAdvertising } from './ble/advertise';
-import { getOrCreateKeyPair } from './crypto/keyManager';
-import { initializeMessageStore } from './mesh/messageStore';
+import { getOrCreateIdentity } from './identity_v2/identity';
+import { startScanning, stopScanning } from '../discovery/ble_v2/scan';
+import { startAdvertising, stopAdvertising } from '../discovery/ble_v2/advertise';
+import { getOrCreateKeyPair } from '../connection/crypto/keyManager';
+import { initializeMessageStore } from '../connection/mesh_v2/messageStore';
 
 interface Identity {
   nodeId: string;
@@ -90,17 +90,17 @@ export async function shutdownBackend(): Promise<void> {
 }
 
 // Re-export key modules for direct access
-export { getOrCreateIdentity } from './identity/identity';
-export { startScanning, stopScanning } from './ble/scan';
-export { startAdvertising, stopAdvertising, isAdvertising } from './ble/advertise';
-export { getOrCreateKeyPair, getPublicKey, rotateKeys } from './crypto/keyManager';
+export { getOrCreateIdentity } from './identity_v2/identity';
+export { startScanning, stopScanning } from '../discovery/ble_v2/scan';
+export { startAdvertising, stopAdvertising, isAdvertising } from '../discovery/ble_v2/advertise';
+export { getOrCreateKeyPair, getPublicKey, rotateKeys } from '../connection/crypto/keyManager';
 export {
   encryptMessage,
   decryptMessage,
   signData,
   verifySignature,
   hashData,
-} from './crypto/encrypt';
-export { messageStore, initializeMessageStore } from './mesh/messageStore';
-export { createPacket } from './mesh/packet';
-export { handlePacket } from './mesh/router';
+} from '../connection/crypto/encrypt';
+export { messageStore, initializeMessageStore } from '../connection/mesh_v2/messageStore';
+export { createPacket } from '../connection/mesh_v2/packet';
+export { handlePacket } from '../connection/mesh_v2/router';

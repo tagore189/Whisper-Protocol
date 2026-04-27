@@ -8,7 +8,7 @@ import {
     Text,
     View,
 } from "react-native";
-import { getOrCreateIdentity } from "../backend/identity/identity";
+import { getOrCreateIdentity } from '../src/core/identity/identity';
 
 export default function IdentityGenerationScreen() {
   const router = useRouter();

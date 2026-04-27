@@ -1,15 +1,13 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { AppSettingsProvider } from "../contexts/AppSettingsContext";
-import { BleConnectionProvider } from "../contexts/BleConnectionContext";
-import { TransportSettingsProvider } from "../contexts/TransportSettingsContext";
+import { AppSettingsProvider } from '../src/core/AppSettingsContext';
+import { BleConnectionProvider } from '../src/connection/BleConnectionContext';
 import { ConnectionRequestListener } from "../components/ConnectionRequestListener";
 import "../src/polyfills";
 
 export default function RootLayout() {
   return (
     <AppSettingsProvider>
-      <TransportSettingsProvider>
         <BleConnectionProvider>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="index" />
@@ -22,7 +20,6 @@ export default function RootLayout() {
           <ConnectionRequestListener />
           <StatusBar style="light" />
         </BleConnectionProvider>
-      </TransportSettingsProvider>
     </AppSettingsProvider>
   );
 }

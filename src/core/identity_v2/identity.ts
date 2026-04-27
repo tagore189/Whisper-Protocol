@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getSecureRandomBytes } from '../crypto/randomBytes';
+import { getSecureRandomBytes } from '../../connection/crypto/randomBytes';
 
 interface Identity {
   nodeId: string;

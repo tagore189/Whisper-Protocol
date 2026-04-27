@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MeshPacket } from '../mesh/packet';
+import { MeshPacket } from '../../connection/mesh/packet';
 
 const KEY = 'CHAT_MESSAGES';
 

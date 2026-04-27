@@ -1,8 +1,8 @@
 import React, { useEffect } from "react";
 import { Alert } from "react-native";
 import { useRouter } from "expo-router";
-import { supabase } from "../src/supabase";
-import { useAppSettings } from "../contexts/AppSettingsContext";
+import { supabase } from '../src/storage/supabase';
+import { useAppSettings } from '../src/core/AppSettingsContext';
 
 export function ConnectionRequestListener() {
   const { settings } = useAppSettings();

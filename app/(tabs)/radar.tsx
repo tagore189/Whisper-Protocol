@@ -12,10 +12,10 @@ import {
   Text,
   View
 } from "react-native";
-import { bleService } from "../../backend/ble/bleService";
-import { useBleScan } from "../../backend/ble/useBleScan";
-import { useAppSettings } from "../../contexts/AppSettingsContext";
-import { supabase } from "../../src/supabase";
+import { bleService } from '../../src/discovery/ble/bleService';
+import { useBleScan } from '../../src/discovery/ble/useBleScan';
+import { useAppSettings } from '../../src/core/AppSettingsContext';
+import { supabase } from '../../src/storage/supabase';
 
 const { width } = Dimensions.get("window");
 

@@ -1,5 +1,5 @@
 import { PermissionsAndroid, Platform } from 'react-native';
-import { getOrCreateIdentity } from '../identity/identity';
+import { getOrCreateIdentity } from '../../core/identity_v2/identity';
 import { getBleManager, SERVICE_ID } from './bleManager';
 
 interface AdvertiserState {

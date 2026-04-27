@@ -5,15 +5,24 @@
     "baseUrl": ".",
     "paths": {
       "@backend/*": [
-        "backend/*"
+        "./backend/*"
       ],
       "@contexts/*": [
-        "contexts/*"
+        "./contexts/*"
       ]
-    }
+    },
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
   },
   "include": [
     "**/*.ts",
-    "**/*.tsx"
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
   ]
 }

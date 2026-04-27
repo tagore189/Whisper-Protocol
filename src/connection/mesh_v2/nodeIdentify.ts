@@ -1,5 +1,5 @@
 // nodeIdentity.ts
-import { getSecureRandomBytes } from '../crypto/randomBytes';
+import { getSecureRandomBytes } from '../../connection/crypto/randomBytes';
 
 export const createNodeId = async () => {
   const bytes = await getSecureRandomBytes(16);
