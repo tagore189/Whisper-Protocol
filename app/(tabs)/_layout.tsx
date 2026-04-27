@@ -45,6 +45,16 @@ export default function TabsLayout() {
           ),
         }}
       />
+
+      <Tabs.Screen
+        name="network"
+        options={{
+          title: "Network",
+          tabBarIcon: ({ color }: { color: string }) => (
+            <MaterialIcons name="public" size={22} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

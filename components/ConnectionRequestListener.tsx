@@ -52,19 +52,12 @@ export function ConnectionRequestListener() {
 
     Alert.alert(
       "Connection Request",
-      `${senderName} wants to connect. Accept or Reject?`,
+      `${senderName} wants to connect with you.`,
       [
+        { text: "Dismiss", style: "cancel" },
         {
-          text: "Reject",
-          style: "cancel",
-          onPress: () => updateRequestStatus(request.id, "rejected"),
-        },
-        {
-          text: "Accept",
-          onPress: () => {
-            updateRequestStatus(request.id, "accepted");
-            promptAddChat(senderName, request.sender_device_id);
-          },
+          text: "View Requests",
+          onPress: () => router.push("/network"),
         },
       ]
     );
