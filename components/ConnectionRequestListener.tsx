@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { Alert } from "react-native";
-import { useRouter } from "expo-router";
+import { type Href, useRouter } from "expo-router";
 import { supabase } from '../src/storage/supabase';
 import { useAppSettings } from '../src/core/AppSettingsContext';
 
@@ -11,7 +11,7 @@ export function ConnectionRequestListener() {
   useEffect(() => {
     if (!settings.deviceId) return;
 
-    // Listen to connection_requests where receiver_device_id = my deviceId and status = pending
+    // Listen for incoming handshake requests directed at this device.
     const channel = supabase
       .channel("connection_requests_listener")
       .on(
@@ -24,7 +24,7 @@ export function ConnectionRequestListener() {
         },
         (payload) => {
           const newRequest = payload.new;
-          if (newRequest.status === "pending") {
+          if (newRequest.status === "hello" || newRequest.status === "pending") {
             handleIncomingRequest(newRequest);
           }
         }
@@ -57,33 +57,17 @@ export function ConnectionRequestListener() {
         { text: "Dismiss", style: "cancel" },
         {
           text: "View Requests",
-          onPress: () => router.push("/network"),
+          onPress: () => router.push("/network" as Href),
         },
       ]
     );
   };
 
-  const updateRequestStatus = async (requestId: string, status: "accepted" | "rejected") => {
+  const updateRequestStatus = async (requestId: string, status: "ack" | "rejected") => {
     await supabase
       .from("connection_requests")
       .update({ status })
       .eq("id", requestId);
-  };
-
-  const promptAddChat = (senderName: string, senderId: string) => {
-    Alert.alert(
-      "Connected!",
-      `Would you like to add ${senderName} to your chats?`,
-      [
-        { text: "No", style: "cancel" },
-        { 
-          text: "Yes", 
-          onPress: () => {
-            router.push(`/chatroom?peerId=${encodeURIComponent(senderId)}`);
-          }
-        }
-      ]
-    );
   };
 
   return null; // Headless component

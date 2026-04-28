@@ -1,4 +1,9 @@
 -- Run these SQL statements in your Supabase SQL Editor
+-- If the tables already exist, run this first to extend the connection handshake statuses:
+-- ALTER TABLE connection_requests DROP CONSTRAINT IF EXISTS connection_requests_status_check;
+-- ALTER TABLE connection_requests
+--   ADD CONSTRAINT connection_requests_status_check
+--   CHECK (status IN ('pending', 'accepted', 'rejected', 'hello', 'ack', 'ready', 'connected', 'failed'));
 
 -- Users table
 CREATE TABLE users (
@@ -13,7 +18,7 @@ CREATE TABLE connection_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   sender_device_id text REFERENCES users(device_id),
   receiver_device_id text REFERENCES users(device_id),
-  status text CHECK (status IN ('pending', 'accepted', 'rejected')),
+  status text CHECK (status IN ('pending', 'accepted', 'rejected', 'hello', 'ack', 'ready', 'connected', 'failed')),
   created_at timestamptz DEFAULT now()
 );
 

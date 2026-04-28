@@ -1,0 +1,122 @@
+
+> fortilink@1.0.0 web
+> expo start --web
+
+env: load .env
+env: export EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY
+Starting project at E:\XYZ
+React Compiler enabled
+Starting Metro Bundler
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ node_modules\expo-router\node\render.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web node_modules\expo-router\entry.js ▓▓░░░░░░░░░░░░░░ 15.4% ( 34/140)
+λ node_modules\expo-router\node\render.js ░░░░░░░░░░░░░░░░  5.5% ( 13/127)
+Web node_modules\expo-router\entry.js ▓▓░░░░░░░░░░░░░░ 15.4% (100/256)
+λ node_modules\expo-router\node\render.js ▓▓░░░░░░░░░░░░░░ 13.9% (110/295)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓░░░░░░░░░░░ 33.9% (208/357)
+λ node_modules\expo-router\node\render.js ▓▓░░░░░░░░░░░░░░ 16.5% (125/310)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓░░░░░░░░░░ 41.3% (260/408)
+λ node_modules\expo-router\node\render.js ▓▓▓▓░░░░░░░░░░░░ 30.5% (205/371)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓░░░░░░░ 57.1% (405/536)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.5% (448/558)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 78.2% (590/667)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 77.1% (565/660)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 81.7% (665/760)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 81.2% (649/740)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 87.0% (858/935)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 85.2% (860/936)
+Web Bundling failed 31718ms node_modules\expo-router\entry.js (1028 modules)
+
+Metro error: Unable to resolve module ../src/polyfills from E:\XYZ\app\_layout.tsx: 
+
+None of these files exist:
+  * src\polyfills(.web.ts|.ts|.web.tsx|.tsx|.web.mjs|.mjs|.web.js|.js|.web.jsx|.jsx|.web.json|.json|.web.cjs|.cjs|.web.scss|.scss|.web.sass|.sass|.web.css|.css)
+  * src\polyfills
+[0m [90m 4 |[39m [36mimport[39m { [33mBleConnectionProvider[39m } [36mfrom[39m [32m'../src/connection/BleConnectionContext'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { [33mConnectionRequestListener[39m } [36mfrom[39m [32m"../components/ConnectionRequestListener"[39m[33m;[39m
+[31m[1m>[22m[39m[90m 6 |[39m [36mimport[39m [32m"../src/polyfills"[39m[33m;[39m
+ [90m   |[39m         [31m[1m^[22m[39m
+ [90m 7 |[39m
+ [90m 8 |[39m [36mexport[39m [36mdefault[39m [36mfunction[39m [33mRootLayout[39m() {
+ [90m 9 |[39m   [36mreturn[39m ([0m
+
+Import stack:
+
+ app\_layout.tsx
+ | import "../src/polyfills"
+
+ app (require.context)
+
+
+Call Stack
+  <unknown> (app\_layout.tsx)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.6% (1029/1052)
+λ Bundling failed 31895ms node_modules\expo-router\node\render.js (1095 modules)
+Web node_modules\expo-router\_error.js ▓▓▓▓▓░░░░░░░░░░░ 37.3% ( 88/144)
+Web node_modules\expo-router\_error.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 87.9% (240/256)
+Web node_modules\expo-router\_error.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.4% (318/319)
+Web node_modules\expo-router\_error.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (319/319)
+Web Bundled 12425ms node_modules\expo-router\_error.js (323 modules)
+ LOG  [web] Logs will appear in the browser console
+Web node_modules\expo-router\entry.js ▓▓▓▓▓░░░░░░░░░░░ 35.2% (222/374)
+λ node_modules\expo-router\node\render.js ▓▓░░░░░░░░░░░░░░ 17.4% (148/355)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓░░░░░░░░ 52.5% (415/573)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 65.0% (496/615)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 85.5% (762/824)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 87.0% (793/850)
+Web Bundling failed 9070ms node_modules\expo-router\entry.js (1042 modules)
+λ Bundling failed 9081ms node_modules\expo-router\node\render.js (1092 modules)
+
+Metro error: Unable to resolve module ../src/polyfills from E:\XYZ\app\_layout.tsx: 
+
+None of these files exist:
+  * src\polyfills(.web.ts|.ts|.web.tsx|.tsx|.web.mjs|.mjs|.web.js|.js|.web.jsx|.jsx|.web.json|.json|.web.cjs|.cjs|.web.scss|.scss|.web.sass|.sass|.web.css|.css)
+  * src\polyfills
+[0m [90m 4 |[39m [36mimport[39m { [33mBleConnectionProvider[39m } [36mfrom[39m [32m'../src/connection/BleConnectionContext'[39m[33m;[39m
+ [90m 5 |[39m [36mimport[39m { [33mConnectionRequestListener[39m } [36mfrom[39m [32m"../components/ConnectionRequestListener"[39m[33m;[39m
+[31m[1m>[22m[39m[90m 6 |[39m [36mimport[39m [32m"../src/polyfills"[39m[33m;[39m
+ [90m   |[39m         [31m[1m^[22m[39m
+ [90m 7 |[39m
+ [90m 8 |[39m [36mexport[39m [36mdefault[39m [36mfunction[39m [33mRootLayout[39m() {
+ [90m 9 |[39m   [36mreturn[39m ([0m
+
+Import stack:
+
+ app\_layout.tsx
+ | import "../src/polyfills"
+
+ app (require.context)
+
+
+Call Stack
+  <unknown> (app\_layout.tsx)
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓░░░░░░░░░░ 39.2% (275/439)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 67.4% (463/564)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 90.6% (951/999)
+λ node_modules\expo-router\node\render.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 86.8% (886/951)
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ node_modules\expo-router\node\render.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+λ Bundled 8143ms node_modules\expo-router\node\render.js (1092 modules)
+λ Bundled 4253ms node_modules\expo-router\node\render.js (1 module)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1058/1058)
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 13710ms node_modules\expo-router\entry.js (1058 modules)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1058/1058)
+Web node_modules\expo-router\entry.js ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 10144ms node_modules\expo-router\entry.js (1 module)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% (17/94)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% ( 55/147)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% ( 75/199)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% (120/284)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% (125/295)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% (164/313)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% (293/478)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 64.0% (439/627)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓░░░░░░ 68.0% (612/742)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓░░░ 86.5% (796/862)
+Web node_modules\expo-router\entry.js ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.1% (1051/1056)
+Web Bundled 38046ms node_modules\expo-router\entry.js (1059 modules)
+ LOG  [web] Logs will appear in the browser console

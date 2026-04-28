@@ -1,7 +1,8 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { type Href, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useBleConnections } from '../../src/connection/BleConnectionContext';
 import { useBleScan } from '../../src/discovery/ble/useBleScan';
 import { getOrCreateIdentity } from '../../src/core/identity_v2/identity';
 
@@ -29,6 +30,7 @@ function timeAgo(ts: number): string {
 export default function MeshVisualizationScreen() {
   const router = useRouter();
   const [myId, setMyId] = useState<string>('');
+  const { canOpenChat } = useBleConnections();
 
   // Use the robust scanner hook
   const { devices: nodes, isScanning: scanning, error: scanError, startScan, stopScan } = useBleScan();
@@ -58,9 +60,13 @@ export default function MeshVisualizationScreen() {
 
   const onConnect = useCallback(
     (peerId: string) => {
+      if (!canOpenChat(peerId)) {
+        Alert.alert("Handshake required", "Complete the connection handshake before opening chat.");
+        return;
+      }
       router.push((`/chatroom?peerId=${encodeURIComponent(peerId)}` as Href));
     },
-    [router]
+    [canOpenChat, router]
   );
 
   return (

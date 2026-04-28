@@ -3,7 +3,7 @@ import { StatusBar } from "expo-status-bar";
 import { AppSettingsProvider } from '../src/core/AppSettingsContext';
 import { BleConnectionProvider } from '../src/connection/BleConnectionContext';
 import { ConnectionRequestListener } from "../components/ConnectionRequestListener";
-import "../src/polyfills";
+import "../src/core/polyfills";
 
 export default function RootLayout() {
   return (

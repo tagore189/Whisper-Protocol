@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
-import { type Href, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo } from "react";
 import {
   ActivityIndicator,
@@ -10,12 +10,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
 } from "react-native";
-import { bleService } from '../../src/discovery/ble/bleService';
-import { useBleScan } from '../../src/discovery/ble/useBleScan';
-import { useAppSettings } from '../../src/core/AppSettingsContext';
-import { supabase } from '../../src/storage/supabase';
+import { useBleConnections } from "../../src/connection/BleConnectionContext";
+import { useAppSettings } from "../../src/core/AppSettingsContext";
+import { bleService } from "../../src/discovery/ble/bleService";
+import { useBleScan } from "../../src/discovery/ble/useBleScan";
 
 const { width } = Dimensions.get("window");
 
@@ -27,11 +27,8 @@ function rssiToSignal(rssi: number | null): "Strong" | "Medium" | "Weak" {
 }
 
 function rssiToDistance(rssi: number | null): string {
-  if (rssi == null) return "—";
-  const d = Math.max(
-    0.1,
-    Math.round(10 * Math.pow(10, (rssi + 50) / -50)) / 10,
-  );
+  if (rssi == null) return "-";
+  const d = Math.max(0.1, Math.round(10 * Math.pow(10, (rssi + 50) / -50)) / 10);
   return d < 1 ? `${d}m` : d <= 99 ? `${Math.round(d)}m` : "99m+";
 }
 
@@ -49,32 +46,31 @@ function signalColor(rssi: number | null): string {
   return "#ef4444";
 }
 
-/* ---------- Screen ---------- */
-
 export default function DeviceDiscoveryScreen() {
   const router = useRouter();
   const isWeb = Platform.OS === "web";
-
-  // Use robust scanning hook
   const { devices, isScanning, error, startScan, stopScan } = useBleScan();
   const { settings: appSettings } = useAppSettings();
+  const { beginHandshake, getConnectionState } = useBleConnections();
 
-  // Auto-start scanning on mount
   useEffect(() => {
     if (!isWeb) {
-      bleService.init().then(() => {
-        startScan();
-      }).catch(e => console.error("BLE init error:", e));
+      bleService
+        .init()
+        .then(() => {
+          startScan();
+        })
+        .catch((e) => console.error("BLE init error:", e));
     }
     return () => {
       stopScan();
     };
-  }, [startScan, stopScan]);
+  }, [isWeb, startScan, stopScan]);
 
   const deviceCount = devices.length;
   const sortedDevices = useMemo(
     () => [...devices].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)),
-    [devices],
+    [devices]
   );
 
   const handleScanPress = useCallback(() => {
@@ -85,44 +81,31 @@ export default function DeviceDiscoveryScreen() {
     }
   }, [isScanning, startScan, stopScan]);
 
-  const sendConnectionRequest = async (device: any) => {
+  const sendConnectionRequest = async (device: { id: string; name: string }) => {
     try {
-      const { error } = await supabase.from('connection_requests').insert({
-        sender_device_id: appSettings.deviceId,
-        receiver_device_id: device.id,
-        status: 'pending'
-      });
-      if (error) throw error;
-      
-      Alert.alert("Connection Request Sent", "Waiting for response...");
-      
-      try {
-        await bleService.connect(device);
-      } catch (ex) {
-        // BLE might fail but Supabase logic continues
-      }
+      await beginHandshake(device);
+      Alert.alert("HELLO sent", "Waiting for ACK from the other device.");
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Could not send connection request.");
+      Alert.alert("Error", e?.message || "Could not start handshake.");
     }
   };
 
   const handleConnect = useCallback(
-    (device: any) => {
+    (device: { id: string; name: string }) => {
       Alert.alert(
         "Device Found",
         `Name: ${device.name}\nID: ${device.id.substring(0, 8)}...`,
         [
           { text: "Cancel", style: "cancel" },
-          { text: "Connect", onPress: () => sendConnectionRequest(device) }
+          { text: "Connect", onPress: () => sendConnectionRequest(device) },
         ]
       );
     },
-    [appSettings.deviceId],
+    [appSettings.deviceId]
   );
 
   return (
     <View style={styles.root}>
-      {/* Top Bar */}
       <View style={styles.topBar}>
         <Pressable onPress={() => router.back()}>
           <MaterialIcons name="arrow-back-ios" size={20} color="#fff" />
@@ -143,7 +126,6 @@ export default function DeviceDiscoveryScreen() {
         </Pressable>
       </View>
 
-      {/* Radar */}
       <View style={styles.radarArea}>
         <View style={styles.radar}>
           <View style={[styles.ring1, isScanning && styles.ringActive]} />
@@ -152,14 +134,9 @@ export default function DeviceDiscoveryScreen() {
           <View style={[styles.ring4, isScanning && styles.ringActive]} />
 
           <View style={styles.core}>
-            <MaterialCommunityIcons
-              name="access-point"
-              size={28}
-              color="#fff"
-            />
+            <MaterialCommunityIcons name="access-point" size={28} color="#fff" />
           </View>
 
-          {/* Show up to 4 ping dots for discovered devices */}
           {deviceCount > 0 && <View style={styles.ping1} />}
           {deviceCount > 1 && <View style={styles.ping2} />}
           {deviceCount > 2 && <View style={styles.ping3} />}
@@ -180,7 +157,6 @@ export default function DeviceDiscoveryScreen() {
         </View>
       </View>
 
-      {/* Error */}
       {error && (
         <View style={styles.errorBadge}>
           <MaterialIcons name="error-outline" size={14} color="#f87171" />
@@ -188,7 +164,6 @@ export default function DeviceDiscoveryScreen() {
         </View>
       )}
 
-      {/* Bottom Sheet */}
       <View style={styles.sheet}>
         <View style={styles.handle} />
 
@@ -203,7 +178,7 @@ export default function DeviceDiscoveryScreen() {
           {deviceCount === 0 && !isScanning && !isWeb && (
             <View style={styles.empty}>
               <Text style={styles.emptyText}>
-                No devices found. Make sure Bluetooth & Location are enabled.
+                No devices found. Make sure Bluetooth and Location are enabled.
               </Text>
             </View>
           )}
@@ -211,22 +186,26 @@ export default function DeviceDiscoveryScreen() {
           {deviceCount === 0 && isScanning && (
             <View style={styles.empty}>
               <ActivityIndicator size="small" color="#6961ff" />
-              <Text style={[styles.emptyText, { marginTop: 8 }]}>
-                Looking for devices...
-              </Text>
+              <Text style={[styles.emptyText, { marginTop: 8 }]}>Looking for devices...</Text>
             </View>
           )}
 
           {sortedDevices.map((device) => (
             <DeviceCard
               key={device.id}
-              name={device.name || `Device ${device.id.slice(-8)} `}
+              name={device.name || `Device ${device.id.slice(-8)}`}
+              handshakeState={getConnectionState(device.id)}
               distance={rssiToDistance(device.rssi)}
               signal={rssiToSignal(device.rssi)}
               signalColor={signalColor(device.rssi)}
               lastSeen={timeAgo(device.lastSeen)}
               rssi={device.rssi}
-              onConnect={() => handleConnect(device)}
+              onConnect={() =>
+                handleConnect({
+                  id: device.id,
+                  name: device.name || `Device ${device.id.slice(-8)}`,
+                })
+              }
             />
           ))}
         </ScrollView>
@@ -235,10 +214,9 @@ export default function DeviceDiscoveryScreen() {
   );
 }
 
-/* ---------- Device Card ---------- */
-
 function DeviceCard({
   name,
+  handshakeState,
   distance,
   signal,
   signalColor: sigColor,
@@ -247,6 +225,7 @@ function DeviceCard({
   onConnect,
 }: {
   name: string;
+  handshakeState: string;
   distance: string;
   signal: string;
   signalColor: string;
@@ -265,10 +244,13 @@ function DeviceCard({
           {name}
         </Text>
         <View style={styles.metaRow}>
-          <Text style={styles.meta}>📏 {distance}</Text>
-          <Text style={[styles.meta, { color: sigColor }]}>📶 {signal}</Text>
-          <Text style={styles.meta}>⏱ {lastSeen}</Text>
+          <Text style={styles.meta}>Distance {distance}</Text>
+          <Text style={[styles.meta, { color: sigColor }]}>Signal {signal}</Text>
+          <Text style={styles.meta}>Seen {lastSeen}</Text>
         </View>
+        {handshakeState !== "IDLE" && (
+          <Text style={styles.handshakeMeta}>Handshake: {handshakeState}</Text>
+        )}
         {rssi != null && (
           <View style={styles.rssiBar}>
             <View
@@ -290,8 +272,6 @@ function DeviceCard({
     </View>
   );
 }
-
-/* ---------- Styles ---------- */
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#100f23" },
@@ -461,6 +441,7 @@ const styles = StyleSheet.create({
   name: { color: "#fff", fontWeight: "700" },
   metaRow: { flexDirection: "row", gap: 12, marginTop: 4 },
   meta: { fontSize: 12, color: "#9ca3af" },
+  handshakeMeta: { fontSize: 11, color: "#6961ff", marginTop: 6, fontWeight: "600" },
   rssiBar: {
     marginTop: 6,
     height: 3,

@@ -33,7 +33,7 @@ function formatTime(ts: number): string {
 
 export default function MeshChatScreen() {
   const router = useRouter();
-  const { connectedDevices } = useBleConnections();
+  const { connectedDevices, canOpenChat } = useBleConnections();
   const connectedByName = useMemo(
     () => new Map(connectedDevices.map((d) => [d.id, d.name])),
     [connectedDevices],
@@ -62,11 +62,14 @@ export default function MeshChatScreen() {
 
   const openChat = useCallback(
     (peerId: string, peerName: string) => {
+      if (!canOpenChat(peerId)) {
+        return;
+      }
       router.push(
         (`/chatroom?peerId=${encodeURIComponent(peerId)}&peerName=${encodeURIComponent(peerName)}` as Href),
       );
     },
-    [router],
+    [canOpenChat, router],
   );
 
   const peerNameFor = useCallback(

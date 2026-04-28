@@ -39,7 +39,7 @@ export default function ChatRoomScreen() {
     peerId: string;
     peerName: string;
   }>();
-  const { isConnected } = useBleConnections();
+  const { isConnected, getConnectionState } = useBleConnections();
   const { settings } = useAppSettings();
   const myId = settings.deviceId;
 
@@ -49,6 +49,7 @@ export default function ChatRoomScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   const connectedBLE = peerId ? isConnected(peerId) : false;
+  const handshakeState = peerId ? getConnectionState(peerId) : "IDLE";
   const displayName = peerName || (peerId ? peerId.slice(-8) : "Unknown");
 
   const markAsRead = async (msgs: Message[]) => {
@@ -59,7 +60,7 @@ export default function ChatRoomScreen() {
   };
 
   const loadMessages = useCallback(async () => {
-    if (!peerId || !myId) return;
+    if (!peerId || !myId || !connectedBLE) return;
     const { data } = await supabase
       .from("messages")
       .select("*")
@@ -70,14 +71,14 @@ export default function ChatRoomScreen() {
       setMessages(data);
       markAsRead(data);
     }
-  }, [peerId, myId]);
+  }, [connectedBLE, peerId, myId]);
 
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
 
   useEffect(() => {
-    if (!peerId || !myId) return;
+    if (!peerId || !myId || !connectedBLE) return;
 
     const channel = supabase
       .channel("messages_channel")
@@ -111,11 +112,11 @@ export default function ChatRoomScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [peerId, myId]);
+  }, [connectedBLE, peerId, myId]);
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || !myId || !peerId || sending) return;
+    if (!text || !myId || !peerId || sending || !connectedBLE) return;
 
     setInput("");
     setSending(true);
@@ -140,6 +141,21 @@ export default function ChatRoomScreen() {
       <View style={styles.root}>
         <View style={styles.notConnected}>
           <Text style={styles.notConnectedText}>No peer selected</Text>
+          <Pressable style={styles.backBtnLarge} onPress={goBack}>
+            <Text style={styles.backBtnText}>Back to chats</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  if (!connectedBLE) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.notConnected}>
+          <Text style={styles.notConnectedText}>
+            Handshake incomplete. Current state: {handshakeState}
+          </Text>
           <Pressable style={styles.backBtnLarge} onPress={goBack}>
             <Text style={styles.backBtnText}>Back to chats</Text>
           </Pressable>

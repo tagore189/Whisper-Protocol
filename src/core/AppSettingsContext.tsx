@@ -31,6 +31,45 @@ const AppSettingsContext = createContext<AppSettingsContextType | undefined>(und
 
 const SETTINGS_KEY = "@fortilink_settings";
 
+function createDeviceName(deviceId: string): string {
+  return `Agent-${deviceId.substring(0, 4).toUpperCase()}`;
+}
+
+async function loadOrCreateSettingsIdentity(
+  storedSettings: Partial<AppSettings> | null
+): Promise<AppSettings> {
+  const mergedSettings = { ...DEFAULT_SETTINGS, ...storedSettings };
+  const existingDeviceId = storedSettings?.deviceId?.trim();
+  const existingDeviceName = storedSettings?.deviceName?.trim();
+
+  if (existingDeviceId) {
+    const resolvedSettings: AppSettings = {
+      ...mergedSettings,
+      deviceId: existingDeviceId,
+      deviceName: existingDeviceName || createDeviceName(existingDeviceId),
+    };
+
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(resolvedSettings));
+    console.log(
+      `[identity] loaded persistent device identity deviceId=${resolvedSettings.deviceId} deviceName=${resolvedSettings.deviceName}`
+    );
+    return resolvedSettings;
+  }
+
+  const deviceId = Crypto.randomUUID();
+  const createdSettings: AppSettings = {
+    ...mergedSettings,
+    deviceId,
+    deviceName: existingDeviceName || createDeviceName(deviceId),
+  };
+
+  await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(createdSettings));
+  console.log(
+    `[identity] created persistent device identity deviceId=${createdSettings.deviceId} deviceName=${createdSettings.deviceName}`
+  );
+  return createdSettings;
+}
+
 export function AppSettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -42,17 +81,8 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
   const loadSettings = async () => {
     try {
       const storedStr = await AsyncStorage.getItem(SETTINGS_KEY);
-      let currentSettings = storedStr ? JSON.parse(storedStr) : null;
-
-      if (!currentSettings || !currentSettings.deviceId) {
-        // Generate new Device ID on first launch
-        const newId = Crypto.randomUUID();
-        const initialName = `Agent-${newId.substring(0, 4).toUpperCase()}`;
-        currentSettings = { ...DEFAULT_SETTINGS, deviceId: newId, deviceName: initialName };
-        await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(currentSettings));
-      } else {
-        currentSettings = { ...DEFAULT_SETTINGS, ...currentSettings };
-      }
+      const storedSettings = storedStr ? (JSON.parse(storedStr) as Partial<AppSettings>) : null;
+      const currentSettings = await loadOrCreateSettingsIdentity(storedSettings);
 
       setSettings(currentSettings);
       setIsLoaded(true);
@@ -80,11 +110,19 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
 
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
     try {
-      const updated = { ...settings, ...newSettings };
+      const { deviceId: ignoredDeviceId, ...restSettings } = newSettings;
+
+      if (typeof ignoredDeviceId === "string" && ignoredDeviceId !== settings.deviceId) {
+        console.log(
+          `[identity] ignored deviceId update attempt; keeping persistent deviceId=${settings.deviceId}`
+        );
+      }
+
+      const updated = { ...settings, ...restSettings };
       setSettings(updated);
       await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
 
-      if (newSettings.deviceName && newSettings.deviceName !== settings.deviceName) {
+      if (restSettings.deviceName && restSettings.deviceName !== settings.deviceName) {
         registerDeviceOnSupabase(updated.deviceId, updated.deviceName);
       }
     } catch (e) {

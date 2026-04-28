@@ -1,0 +1,40 @@
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "radar" exists in nested children: [
+  'chatroom',
+  'idgen',
+  'index',
+  'modal',
+  'onboarding',
+  'qr-discovery',
+  'settings',
+  '(tabs)'
+] 
+  console.warn (E:\XYZ\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (E:\XYZ\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (E:\XYZ\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (E:\XYZ\node_modules\expo-router\build\useScreens.js:121:38)
+  Component (E:\XYZ\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.callComponentInDEV [as react-stack-bottom-frame] (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:8970:18)
+  renderWithHooks (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:4699:19)
+  run (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5539:39)
+  retryNode (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5899:31)
+"shadow*" style props are deprecated. Use "boxShadow".
+λ  WARN  [Layout children]: No route named "radar" exists in nested children: [
+  'chatroom',
+  'idgen',
+  'index',
+  'modal',
+  'onboarding',
+  'qr-discovery',
+  'settings',
+  '(tabs)'
+] 
+  console.warn (E:\XYZ\node_modules\expo\node_modules\@expo\cli\src\start\server\serverLogLikeMetro.ts:161:21)
+  map (E:\XYZ\node_modules\expo-router\build\useScreens.js:69:21)
+  getSortedChildren (E:\XYZ\node_modules\expo-router\build\useScreens.js:62:10)
+  useSortedScreens (E:\XYZ\node_modules\expo-router\build\useScreens.js:121:38)
+  Component (E:\XYZ\node_modules\expo-router\build\layouts\withLayoutContext.js:151:57)
+  Object.callComponentInDEV [as react-stack-bottom-frame] (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:8970:18)
+  renderWithHooks (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:4699:19)
+  run (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5539:39)
+  retryNode (E:\XYZ\node_modules\react-dom\cjs\react-dom-server-legacy.node.development.js:5899:31)

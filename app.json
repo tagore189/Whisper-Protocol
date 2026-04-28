@@ -48,6 +48,12 @@
           }
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow FortiLink to scan device discovery QR codes."
+        }
+      ],
       "react-native-ble-plx",
       "expo-secure-store"
     ],
