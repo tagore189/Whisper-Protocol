@@ -1,7 +1,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { type Href, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -28,6 +28,7 @@ import {
 type ScreenMode = "show" | "scan";
 
 const SCAN_DUPLICATE_COOLDOWN_MS = 2500;
+const SCAN_EVENT_THROTTLE_MS = 350;
 
 function getScreenMode(modeParam: string | string[] | undefined): ScreenMode {
   return modeParam === "scan" ? "scan" : "show";
@@ -46,6 +47,8 @@ export default function QrDiscoveryScreen() {
   );
   const [refreshTick, setRefreshTick] = useState(Date.now());
   const lastScanRef = useRef<{ signature: string; scannedAt: number } | null>(null);
+  const lastScanAttemptRef = useRef(0);
+  const resetScanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!settings.deviceId) {
@@ -72,33 +75,52 @@ export default function QrDiscoveryScreen() {
     }
   }, [qrPayload.timestamp, refreshTick, screenMode, settings.deviceId, settings.deviceName]);
 
+  useEffect(
+    () => () => {
+      if (resetScanTimeoutRef.current) {
+        clearTimeout(resetScanTimeoutRef.current);
+        resetScanTimeoutRef.current = null;
+      }
+    },
+    []
+  );
+
   const regenerateQrCode = () => {
     setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName));
     setRefreshTick(Date.now());
   };
 
-  const handleBarcodeScanned = async ({ data }: { data: string }) => {
+  const releaseScanLock = useCallback((delayMs: number) => {
+    if (resetScanTimeoutRef.current) {
+      clearTimeout(resetScanTimeoutRef.current);
+    }
+    resetScanTimeoutRef.current = setTimeout(() => {
+      setIsHandlingScan(false);
+      resetScanTimeoutRef.current = null;
+    }, delayMs);
+  }, []);
+
+  const handleBarcodeScanned = useCallback(async ({ data }: { data: string }) => {
     if (isHandlingScan) {
       return;
     }
 
-    console.log("QR scanned");
+    const now = Date.now();
+    if (now - lastScanAttemptRef.current < SCAN_EVENT_THROTTLE_MS) {
+      return;
+    }
+    lastScanAttemptRef.current = now;
 
     const parsed = parseQrDiscoveryPayload(data);
-    if (parsed) {
-      console.log("Parsed deviceId", parsed.deviceId);
-    }
-
     const validation = validateQrDiscoveryPayload(parsed, settings.deviceId);
     if (!validation.ok) {
       Alert.alert("Scan rejected", validation.message);
       setIsHandlingScan(true);
-      setTimeout(() => setIsHandlingScan(false), 1200);
+      releaseScanLock(1200);
       return;
     }
 
     const signature = getQrDiscoverySignature(validation.payload);
-    const now = Date.now();
     if (
       lastScanRef.current &&
       lastScanRef.current.signature === signature &&
@@ -119,9 +141,9 @@ export default function QrDiscoveryScreen() {
       router.back();
     } catch (error: any) {
       Alert.alert("Scan failed", error?.message || "Could not create a connection request from this QR code.");
-      setIsHandlingScan(false);
+      releaseScanLock(400);
     }
-  };
+  }, [beginHandshake, isHandlingScan, releaseScanLock, router, settings.deviceId]);
 
   const expiresInMs = Math.max(0, QR_DISCOVERY_EXPIRATION_MS - (refreshTick - qrPayload.timestamp));
   const secondsRemaining = Math.ceil(expiresInMs / 1000);
@@ -198,7 +220,7 @@ export default function QrDiscoveryScreen() {
             <View style={styles.centerCard}>
               <MaterialIcons name="camera-alt" size={40} color="#6961ff" />
               <Text style={styles.centerTitle}>Camera access required</Text>
-              <Text style={styles.centerBody}>FortiLink needs camera access to scan another device's discovery QR code.</Text>
+              <Text style={styles.centerBody}>FortiLink needs camera access to scan another device&apos;s discovery QR code.</Text>
               <Pressable style={styles.primaryBtn} onPress={requestPermission}>
                 <Text style={styles.primaryBtnText}>Allow Camera</Text>
               </Pressable>

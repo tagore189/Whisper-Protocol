@@ -3,17 +3,18 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { startAdvertising, stopAdvertising } from '../discovery/ble_v2/advertise';
-import { startScanning, stopScanning } from '../discovery/ble_v2/scan';
 import {
-    decryptMessage,
-    encryptMessage,
-    hashData,
+  decryptMessage,
+  encryptMessage,
+  hashData,
 } from '../connection/crypto/encrypt';
 import { getOrCreateKeyPair, rotateKeys } from '../connection/crypto/keyManager';
-import { getOrCreateIdentity } from '../core/identity_v2/identity';
 import { initializeMessageStore, messageStore } from '../connection/mesh_v2/messageStore';
 import { createPacket } from '../connection/mesh_v2/packet';
+import { getOrCreateIdentity } from '../core/identity_v2/identity';
+import { startAdvertising, stopAdvertising } from '../discovery/ble_v2/advertise';
+import { startScanning, stopScanning } from '../discovery/ble_v2/scan';
+import { localDatabase } from '../storage/localDatabase';
 
 interface Identity {
   nodeId: string;
@@ -44,6 +45,7 @@ export function useBackendInitialization() {
         setLoading(true);
         const nodeIdentity = await getOrCreateIdentity();
         await initializeMessageStore();
+        await localDatabase.initialize();
         setIdentity(nodeIdentity);
         setError(null);
       } catch (err) {
@@ -318,16 +320,35 @@ export function useMeshNetworking() {
 export function useProtocol() {
   const backendInit = useBackendInitialization();
   const bleAdvertising = useBLEAdvertising();
+  const { advertising, start, stop } = bleAdvertising;
   const bleScanning = useBLEScanning();
   const encryption = useEncryption();
   const messageStore = useMessageStore();
   const mesh = useMeshNetworking();
 
   useEffect(() => {
-    if (backendInit.identity && !bleAdvertising.advertising) {
-      bleAdvertising.start();
-    }
-  }, [backendInit.identity, bleAdvertising]);
+    let mounted = true;
+    let startedByHook = false;
+
+    const ensureAdvertising = async () => {
+      if (backendInit.identity && !advertising) {
+        await start();
+        if (mounted) {
+          startedByHook = true;
+        }
+      }
+    };
+
+    void ensureAdvertising();
+
+    return () => {
+      mounted = false;
+      if (startedByHook) {
+        void stop();
+      }
+      stopScanning();
+    };
+  }, [advertising, backendInit.identity, start, stop]);
 
   return {
     ...backendInit,

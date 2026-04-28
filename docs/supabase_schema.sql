@@ -22,15 +22,27 @@ CREATE TABLE connection_requests (
   created_at timestamptz DEFAULT now()
 );
 
+-- Ensure only one active handshake exists between any pair of devices
+CREATE UNIQUE INDEX connection_requests_unique_pair_idx
+  ON connection_requests (
+    LEAST(sender_device_id, receiver_device_id),
+    GREATEST(sender_device_id, receiver_device_id)
+  );
+
 -- Messages table
 CREATE TABLE messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id text NOT NULL,
   sender_device_id text,
   receiver_device_id text,
   content text,
-  created_at timestamptz DEFAULT now(),
-  read_at timestamptz
+  status text CHECK (status IN ('sent', 'delivered', 'read')) NOT NULL DEFAULT 'sent',
+  created_at timestamptz DEFAULT now()
 );
+
+-- If the messages table already exists, use these updates instead:
+-- ALTER TABLE messages ADD COLUMN IF NOT EXISTS chat_id text;
+-- ALTER TABLE messages ADD COLUMN IF NOT EXISTS status text CHECK (status IN ('sent', 'delivered', 'read')) DEFAULT 'sent';
 
 -- Enable RLS
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;

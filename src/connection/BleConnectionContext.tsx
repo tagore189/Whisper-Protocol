@@ -59,6 +59,8 @@ const BleConnectionContext = createContext<BleConnectionContextValue | null>(nul
 
 const HANDSHAKE_TIMEOUT_MS = 12_000;
 const HANDSHAKE_MAX_RETRIES = 2;
+const RECONNECT_DELAY_MS = 5_000;
+const STALE_CONNECTION_MS = 30_000;
 
 type RetrySpec = {
   rowId: string;
@@ -92,6 +94,7 @@ function mapStatusToHandshakeState(
 export function BleConnectionProvider({ children }: { children: React.ReactNode }) {
   const { settings } = useAppSettings();
   const [devicesById, setDevicesById] = useState<Record<string, ConnectedDevice>>({});
+  const devicesByIdRef = useRef<Record<string, ConnectedDevice>>({});
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const activeRowsRef = useRef<Map<string, ConnectionRequestRow>>(new Map());
   const processingRowsRef = useRef<Set<string>>(new Set());
@@ -117,6 +120,13 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
     []
   );
 
+  useEffect(() => {
+    devicesByIdRef.current = devicesById;
+  }, [devicesById]);
+
+  const reconnectTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const lastSeenRef = useRef<Map<string, number>>(new Map());
+
   const clearPeerTimer = useCallback((peerId: string) => {
     const existing = timersRef.current.get(peerId);
     if (existing) {
@@ -124,6 +134,94 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
       timersRef.current.delete(peerId);
     }
   }, []);
+
+  const clearReconnectTimer = useCallback((peerId: string) => {
+    const existing = reconnectTimersRef.current.get(peerId);
+    if (existing) {
+      clearTimeout(existing);
+      reconnectTimersRef.current.delete(peerId);
+    }
+  }, []);
+
+  const updateLastSeen = useCallback((peerId: string) => {
+    lastSeenRef.current.set(peerId, Date.now());
+  }, []);
+
+  let beginHandshake: (device: { id: string; name: string }) => Promise<void>;
+
+  const scheduleReconnect = useCallback(
+    (peerId: string, peerName: string): void => {
+      clearReconnectTimer(peerId);
+      const timer = setTimeout(async () => {
+        console.log(
+          `[handshake][${settings.deviceId || 'unknown'}][${peerId}] reconnecting after failure or stale connection`
+        );
+
+        try {
+          if (typeof beginHandshake === 'function') {
+            await beginHandshake({ id: peerId, name: peerName });
+          }
+        } catch (error) {
+          console.error('Reconnect attempt failed:', error);
+        }
+      }, RECONNECT_DELAY_MS);
+
+      reconnectTimersRef.current.set(peerId, timer);
+    },
+    [clearReconnectTimer, settings.deviceId]
+  );
+
+  const buildConnectionQuery = useCallback(
+    (peerId: string) =>
+      `or(and(sender_device_id.eq.${settings.deviceId},receiver_device_id.eq.${peerId}),and(sender_device_id.eq.${peerId},receiver_device_id.eq.${settings.deviceId}))`,
+    [settings.deviceId]
+  );
+
+  const findExistingConnection = useCallback(
+    async (peerId: string): Promise<ConnectionRequestRow | null> => {
+      if (!settings.deviceId) return null;
+      const { data, error } = await supabase
+        .from('connection_requests')
+        .select(
+          '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
+        )
+        .or(buildConnectionQuery(peerId))
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.warn('Failed to query existing connection row:', error);
+        return null;
+      }
+
+      return data as ConnectionRequestRow | null;
+    },
+    [buildConnectionQuery, settings.deviceId]
+  );
+
+  const updateConnectionStatus = useCallback(
+    async (
+      rowId: string,
+      status: ConnectionRequestRow['status'],
+      expectedStatus: ConnectionRequestRow['status'] | null = null
+    ) => {
+      let query = supabase.from('connection_requests').update({ status });
+      if (expectedStatus) {
+        query = query.eq('status', expectedStatus);
+      }
+      const result = await query
+        .eq('id', rowId)
+        .select(
+          '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
+        )
+        .single();
+      if (result.error) {
+        return { error: result.error, data: null };
+      }
+      return { error: null as null, data: result.data as ConnectionRequestRow | null };
+    },
+    []
+  );
 
   const logStep = useCallback(
     (peerId: string, step: "HELLO" | "ACK" | "READY", message: string) => {
@@ -195,123 +293,118 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   );
 
   const processRow = useCallback(
-    async (row: ConnectionRequestRow) => {
+    async (row: ConnectionRequestRow): Promise<void> => {
       if (!settings.deviceId) return;
       if (processingRowsRef.current.has(row.id)) return;
 
       processingRowsRef.current.add(row.id);
       try {
-        const isSender = row.sender_device_id === settings.deviceId;
-        const peerId = isSender ? row.receiver_device_id : row.sender_device_id;
+        const peerId =
+          row.sender_device_id === settings.deviceId
+            ? row.receiver_device_id
+            : row.sender_device_id;
         const peerName =
-          (isSender ? row.receiver?.device_name : row.sender?.device_name) ||
-          peerId.slice(-8);
+          (row.sender_device_id === settings.deviceId
+            ? row.receiver?.device_name
+            : row.sender?.device_name) || peerId.slice(-8);
 
         activeRowsRef.current.set(peerId, row);
+        updateLastSeen(peerId);
 
-        if (row.status === "rejected" || row.status === "failed") {
+        if (row.status === 'rejected' || row.status === 'failed') {
           clearPeerTimer(peerId);
-          setPeerState(peerId, peerName, "FAILED", {
+          clearReconnectTimer(peerId);
+          setPeerState(peerId, peerName, 'FAILED', {
             requestId: row.id,
-            lastError: row.status === "rejected" ? "Connection rejected" : "Handshake failed",
+            lastError:
+              row.status === 'rejected'
+                ? 'Connection rejected'
+                : 'Handshake failed',
           });
+
+          scheduleReconnect(peerId, peerName);
           return;
         }
 
-        if (row.status === "connected") {
+        if (row.status === 'connected') {
           clearPeerTimer(peerId);
-          setPeerState(peerId, peerName, "CONNECTED", {
+          clearReconnectTimer(peerId);
+          setPeerState(peerId, peerName, 'CONNECTED', {
             requestId: row.id,
             lastError: undefined,
           });
           return;
         }
 
-        if (row.status === "hello") {
-          setPeerState(peerId, peerName, "HELLO", {
+        if (row.status === 'hello') {
+          setPeerState(peerId, peerName, 'HELLO', {
             requestId: row.id,
             lastError: undefined,
           });
 
-          if (isSender) {
-            logStep(peerId, "HELLO", "HELLO sent; waiting for ACK");
-            scheduleRetry({
-              rowId: row.id,
-              peerId,
-              peerName,
-              statusToResend: "hello",
-              phase: "ACK",
-              retryCount: devicesById[peerId]?.retryCount ?? 0,
-            });
-          }
-          return;
-        }
-
-        if (row.status === "ack") {
-          clearPeerTimer(peerId);
-          setPeerState(peerId, peerName, "ACK", {
-            requestId: row.id,
-            lastError: undefined,
-          });
-
-          if (isSender) {
-            logStep(peerId, "ACK", "ACK received; promoting local state to READY");
-            logStep(peerId, "READY", "local device reached READY");
-            setPeerState(peerId, peerName, "READY", {
-              requestId: row.id,
-              retryCount: devicesById[peerId]?.retryCount ?? 0,
-            });
-
-            const { error } = await supabase
-              .from("connection_requests")
-              .update({ status: "ready" })
-              .eq("id", row.id)
-              .eq("status", "ack");
-
-            if (!error) {
-              scheduleRetry({
-                rowId: row.id,
-                peerId,
-                peerName,
-                statusToResend: "ready",
-                phase: "CONNECTED",
-                retryCount: devicesById[peerId]?.retryCount ?? 0,
-              });
-            }
-          }
-          return;
-        }
-
-        if (row.status === "ready") {
-          setPeerState(peerId, peerName, "READY", {
-            requestId: row.id,
-            lastError: undefined,
-          });
-
-          if (!isSender) {
-            logStep(peerId, "READY", "peer is READY; local device reached READY");
-            clearPeerTimer(peerId);
-            const { error } = await supabase
-              .from("connection_requests")
-              .update({ status: "connected" })
-              .eq("id", row.id)
-              .eq("status", "ready");
-
-            if (!error) {
-              setPeerState(peerId, peerName, "CONNECTED", {
-                requestId: row.id,
-              });
+          if (row.sender_device_id !== settings.deviceId) {
+            logStep(peerId, 'HELLO', 'HELLO received; sending ACK');
+            const { data } = await updateConnectionStatus(row.id, 'ack', 'hello');
+            if (data) {
+              await processRow(data);
             }
           } else {
+            logStep(peerId, 'HELLO', 'HELLO sent; waiting for ACK');
             scheduleRetry({
               rowId: row.id,
               peerId,
               peerName,
-              statusToResend: "ready",
-              phase: "CONNECTED",
-              retryCount: devicesById[peerId]?.retryCount ?? 0,
+              statusToResend: 'hello',
+              phase: 'ACK',
+              retryCount: devicesByIdRef.current[peerId]?.retryCount ?? 0,
             });
           }
+          return;
+        }
+
+        if (row.status === 'ack') {
+          clearPeerTimer(peerId);
+          setPeerState(peerId, peerName, 'ACK', {
+            requestId: row.id,
+            lastError: undefined,
+          });
+
+          logStep(peerId, 'ACK', 'ACK observed; moving to READY');
+          setPeerState(peerId, peerName, 'READY', {
+            requestId: row.id,
+            retryCount: devicesByIdRef.current[peerId]?.retryCount ?? 0,
+          });
+
+          const { data } = await updateConnectionStatus(row.id, 'ready', 'ack');
+          if (data) {
+            scheduleRetry({
+              rowId: row.id,
+              peerId,
+              peerName,
+              statusToResend: 'ready',
+              phase: 'CONNECTED',
+              retryCount: devicesByIdRef.current[peerId]?.retryCount ?? 0,
+            });
+            await processRow(data);
+          }
+          return;
+        }
+
+        if (row.status === 'ready') {
+          clearPeerTimer(peerId);
+          setPeerState(peerId, peerName, 'READY', {
+            requestId: row.id,
+            lastError: undefined,
+          });
+
+          logStep(peerId, 'READY', 'READY observed; moving to CONNECTED');
+          const { data } = await updateConnectionStatus(row.id, 'connected', 'ready');
+          if (data) {
+            setPeerState(peerId, peerName, 'CONNECTED', {
+              requestId: row.id,
+            });
+          }
+          return;
         }
       } finally {
         processingRowsRef.current.delete(row.id);
@@ -319,11 +412,14 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
     },
     [
       clearPeerTimer,
-      devicesById,
+      clearReconnectTimer,
       logStep,
+      scheduleReconnect,
       scheduleRetry,
       setPeerState,
       settings.deviceId,
+      updateConnectionStatus,
+      updateLastSeen,
     ]
   );
 
@@ -370,35 +466,62 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
       )
       .subscribe();
 
+    const keepAliveTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [peerId, lastSeen] of lastSeenRef.current.entries()) {
+        const state = devicesByIdRef.current[peerId]?.handshakeState;
+        if (state === 'CONNECTED' && now - lastSeen > STALE_CONNECTION_MS) {
+          const peerName = devicesByIdRef.current[peerId]?.name || peerId.slice(-8);
+          console.log(
+            `[handshake][${settings.deviceId || 'unknown'}][${peerId}] detected stale connection; reconnecting`
+          );
+          scheduleReconnect(peerId, peerName);
+        }
+      }
+    }, 10_000);
+
     return () => {
       isMounted = false;
       supabase.removeChannel(channel);
       timersRef.current.forEach((timer) => clearTimeout(timer));
       timersRef.current.clear();
+      reconnectTimersRef.current.forEach((timer) => clearTimeout(timer));
+      reconnectTimersRef.current.clear();
+      clearInterval(keepAliveTimer);
     };
-  }, [processRow, settings.deviceId]);
+  }, [processRow, scheduleReconnect, settings.deviceId]);
 
-  const beginHandshake = useCallback(
+  beginHandshake = useCallback(
     async (device: { id: string; name: string }) => {
       if (!settings.deviceId) {
-        throw new Error("Local device identity unavailable");
+        throw new Error('Local device identity unavailable');
       }
 
       clearPeerTimer(device.id);
-      logStep(device.id, "HELLO", "starting outgoing handshake");
-      setPeerState(device.id, device.name, "HELLO", {
+      clearReconnectTimer(device.id);
+      logStep(device.id, 'HELLO', 'starting outgoing handshake');
+      setPeerState(device.id, device.name, 'HELLO', {
         retryCount: 0,
         lastError: undefined,
       });
 
-      const existing = activeRowsRef.current.get(device.id);
+      const existing =
+        activeRowsRef.current.get(device.id) ??
+        (await findExistingConnection(device.id));
+
       if (existing) {
+        if (existing.status === 'connected') {
+          await processRow(existing);
+          return;
+        }
+
+        const resolvedStatus = existing.status === 'failed' || existing.status === 'rejected' ? 'hello' : existing.status;
         const { data, error } = await supabase
-          .from("connection_requests")
-          .update({ status: "hello" })
-          .eq("id", existing.id)
+          .from('connection_requests')
+          .update({ status: resolvedStatus })
+          .eq('id', existing.id)
           .select(
-            "*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)"
+            '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
           )
           .single();
 
@@ -408,43 +531,72 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
       }
 
       const { data, error } = await supabase
-        .from("connection_requests")
+        .from('connection_requests')
         .insert({
           sender_device_id: settings.deviceId,
           receiver_device_id: device.id,
-          status: "hello",
+          status: 'hello',
         })
         .select(
-          "*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)"
+          '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
         )
         .single();
 
       if (error) throw error;
       await processRow(data as ConnectionRequestRow);
     },
-    [clearPeerTimer, logStep, processRow, setPeerState, settings.deviceId]
+    [
+      clearPeerTimer,
+      clearReconnectTimer,
+      findExistingConnection,
+      logStep,
+      processRow,
+      setPeerState,
+      settings.deviceId,
+    ]
   );
 
   const acceptHandshake = useCallback(
     async (requestId: string, peer: { id: string; name: string }) => {
-      logStep(peer.id, "ACK", "accepting handshake and sending ACK");
-      setPeerState(peer.id, peer.name, "ACK", {
+      logStep(peer.id, 'ACK', 'accepting handshake and sending ACK');
+      setPeerState(peer.id, peer.name, 'ACK', {
         requestId,
         retryCount: 0,
         lastError: undefined,
       });
 
       const { data, error } = await supabase
-        .from("connection_requests")
-        .update({ status: "ack" })
-        .eq("id", requestId)
+        .from('connection_requests')
+        .update({ status: 'ack' })
+        .eq('id', requestId)
+        .eq('status', 'hello')
         .select(
-          "*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)"
+          '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
         )
         .single();
 
-      if (error) throw error;
-      await processRow(data as ConnectionRequestRow);
+      if (error && error.code !== 'PGRST116') {
+        // PGRST116 is returned when no rows are updated due to status mismatch.
+        throw error;
+      }
+
+      if (data) {
+        await processRow(data as ConnectionRequestRow);
+        return;
+      }
+
+      const fallback = await supabase
+        .from('connection_requests')
+        .select(
+          '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
+        )
+        .eq('id', requestId)
+        .single();
+
+      if (fallback.error) throw fallback.error;
+      if (fallback.data) {
+        await processRow(fallback.data as ConnectionRequestRow);
+      }
     },
     [logStep, processRow, setPeerState]
   );
@@ -452,10 +604,12 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   const removeConnected = useCallback(
     (deviceId: string) => {
       clearPeerTimer(deviceId);
+      clearReconnectTimer(deviceId);
       updatePeer(deviceId, () => null);
       activeRowsRef.current.delete(deviceId);
+      lastSeenRef.current.delete(deviceId);
     },
-    [clearPeerTimer, updatePeer]
+    [clearPeerTimer, clearReconnectTimer, updatePeer]
   );
 
   const connectedDevices = useMemo(

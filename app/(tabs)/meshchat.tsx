@@ -10,12 +10,12 @@ import {
   Text,
   View,
 } from "react-native";
-import { getOrCreateIdentity } from '../../src/core/identity/identity';
 import {
   getConversations,
-  type Conversation,
+  type Conversation
 } from '../../src/chat/msg/chatStore';
 import { useBleConnections } from '../../src/connection/BleConnectionContext';
+import { getOrCreateIdentity } from '../../src/core/identity/identity';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -43,12 +43,28 @@ export default function MeshChatScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const allPeers = useMemo(() => {
+    const conversationPeers = new Set(conversations.map(c => c.peerId));
+    return [
+      ...conversations,
+      ...connectedDevices
+        .filter(d => !conversationPeers.has(d.id))
+        .map(d => ({
+          peerId: d.id,
+          peerName: d.name,
+          lastMessage: "No messages yet",
+          lastTime: 0,
+          lastFromMe: false,
+          chatId: "",
+        }))
+    ];
+  }, [conversations, connectedDevices]);
+
   const load = useCallback(async () => {
     const identity = await getOrCreateIdentity();
-    const allowed = new Set(connectedDevices.map((d) => d.id));
-    const list = await getConversations(identity.id, allowed);
+    const list = await getConversations(identity.id);
     setConversations(list);
-  }, [connectedDevices]);
+  }, []);
 
   useEffect(() => {
     load().finally(() => setLoading(false));
@@ -119,7 +135,7 @@ export default function MeshChatScreen() {
               </Text>
               <Pressable
                 style={styles.discoverBtn}
-                onPress={() => router.push("/radar" as Href)}
+                onPress={() => router.push("/(tabs)/radar" as Href)}
               >
                 <MaterialIcons name="radar" size={20} color="#fff" />
                 <Text style={styles.discoverBtnText}>Discover devices</Text>
@@ -127,26 +143,15 @@ export default function MeshChatScreen() {
             </View>
           ) : (
             <>
-              {conversations.map((c) => (
+              {allPeers.map((c) => (
                 <ChatItem
                   key={c.peerId}
                   name={peerNameFor(c.peerId)}
                   message={c.lastMessage}
-                  time={formatTime(c.lastTime)}
+                  time={c.lastTime ? formatTime(c.lastTime) : "-"}
                   onPress={() => openChat(c.peerId, peerNameFor(c.peerId))}
                 />
               ))}
-              {connectedDevices
-                .filter((d) => !conversations.some((c) => c.peerId === d.id))
-                .map((d) => (
-                  <ChatItem
-                    key={d.id}
-                    name={d.name}
-                    message="No messages yet"
-                    time="-"
-                    onPress={() => openChat(d.id, d.name)}
-                  />
-                ))}
             </>
           )}
         </ScrollView>

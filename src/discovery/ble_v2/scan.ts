@@ -11,7 +11,25 @@ export interface Node {
 const nodes = new Map<string, Node>();
 let scanning = false;
 let pruneTimer: ReturnType<typeof setInterval> | null = null;
-const NODE_STALE_MS = 8000;
+let emitTimer: ReturnType<typeof setTimeout> | null = null;
+const NODE_STALE_MS = 12000;
+const EMIT_THROTTLE_MS = 750;
+const PRUNE_INTERVAL_MS = 4000;
+
+function stopEmitTimer(): void {
+  if (emitTimer) {
+    clearTimeout(emitTimer);
+    emitTimer = null;
+  }
+}
+
+function scheduleEmit(onNodeFound: (nodes: Node[]) => void): void {
+  if (emitTimer) return;
+  emitTimer = setTimeout(() => {
+    emitTimer = null;
+    onNodeFound(Array.from(nodes.values()));
+  }, EMIT_THROTTLE_MS);
+}
 
 async function requestScanPermissions(): Promise<boolean> {
   if (Platform.OS !== 'android') {
@@ -61,13 +79,13 @@ export async function startScanning(onNodeFound: (nodes: Node[]) => void): Promi
     }
     if (!device) return;
 
+    const existing = nodes.get(device.id);
     nodes.set(device.id, {
       id: device.id,
-      rssi: device.rssi,
+      rssi: device.rssi ?? existing?.rssi ?? null,
       lastSeen: Date.now(),
     });
-
-    onNodeFound([...nodes.values()]);
+    scheduleEmit(onNodeFound);
   });
 
   pruneTimer = setInterval(() => {
@@ -80,9 +98,9 @@ export async function startScanning(onNodeFound: (nodes: Node[]) => void): Promi
       }
     }
     if (changed) {
-      onNodeFound([...nodes.values()]);
+      scheduleEmit(onNodeFound);
     }
-  }, 2000);
+  }, PRUNE_INTERVAL_MS);
 
   return true;
 }
@@ -103,6 +121,7 @@ export function stopScanning() {
     clearInterval(pruneTimer);
     pruneTimer = null;
   }
+  stopEmitTimer();
   nodes.clear();
   scanning = false;
 }

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 
 interface Message {
   id: string;
@@ -30,6 +31,11 @@ class ReactNativeMessageStore {
   private pendingMessages: Message[] = [];
   private deliveredMessages: Set<string> = new Set();
   private listeners: ((store: MessageStore) => void)[] = [];
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private peerToConversationId: Map<string, string> = new Map();
+  private readonly maxPendingMessages = 500;
+  private readonly maxDeliveredIds = 5000;
+  private readonly persistDebounceMs = 200;
 
   /**
    * Initialize the message store from persistent storage
@@ -44,6 +50,7 @@ class ReactNativeMessageStore {
       if (conversationData) {
         const conversations = JSON.parse(conversationData);
         this.conversations = new Map(Object.entries(conversations));
+        this.rebuildPeerIndex();
       }
 
       if (deliveredData) {
@@ -60,7 +67,7 @@ class ReactNativeMessageStore {
   /**
    * Save current state to persistent storage
    */
-  private async persist(): Promise<void> {
+  private async persistNow(): Promise<void> {
     try {
       const conversationData = Object.fromEntries(this.conversations);
       const deliveredData = Array.from(this.deliveredMessages);
@@ -77,6 +84,23 @@ class ReactNativeMessageStore {
     }
   }
 
+  private queuePersist(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+    }
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      void this.persistNow();
+    }, this.persistDebounceMs);
+  }
+
+  private rebuildPeerIndex(): void {
+    this.peerToConversationId.clear();
+    for (const [conversationId, thread] of this.conversations.entries()) {
+      this.peerToConversationId.set(thread.peerId, conversationId);
+    }
+  }
+
   /**
    * Add or update a message in a conversation
    */
@@ -87,7 +111,7 @@ class ReactNativeMessageStore {
     encrypted: boolean = false
   ): Promise<Message> {
     try {
-      const conversationId = this.getConversationId(from, to);
+      const conversationId = await this.getConversationId(from, to);
       const message: Message = {
         id: Math.random().toString(36).slice(2),
         from,
@@ -104,13 +128,14 @@ class ReactNativeMessageStore {
           messages: [],
           lastUpdated: Date.now(),
         });
+        this.peerToConversationId.set(from === to ? from : to, conversationId);
       }
 
       const conversation = this.conversations.get(conversationId)!;
       conversation.messages.push(message);
       conversation.lastUpdated = Date.now();
 
-      await this.persist();
+      this.queuePersist();
       this.notifyListeners();
 
       return message;
@@ -126,7 +151,11 @@ class ReactNativeMessageStore {
   async markMessageAsDelivered(messageId: string): Promise<void> {
     try {
       this.deliveredMessages.add(messageId);
-      await this.persist();
+      if (this.deliveredMessages.size > this.maxDeliveredIds) {
+        const keep = Array.from(this.deliveredMessages).slice(-this.maxDeliveredIds);
+        this.deliveredMessages = new Set(keep);
+      }
+      this.queuePersist();
       this.notifyListeners();
     } catch (error) {
       console.error('Failed to mark message as delivered:', error);
@@ -170,6 +199,9 @@ class ReactNativeMessageStore {
   async addPendingMessage(message: Message): Promise<void> {
     try {
       this.pendingMessages.push(message);
+      if (this.pendingMessages.length > this.maxPendingMessages) {
+        this.pendingMessages = this.pendingMessages.slice(-this.maxPendingMessages);
+      }
       this.notifyListeners();
     } catch (error) {
       console.error('Failed to add pending message:', error);
@@ -181,7 +213,10 @@ class ReactNativeMessageStore {
    */
   async removePendingMessage(messageId: string): Promise<void> {
     try {
-      this.pendingMessages = this.pendingMessages.filter(m => m.id !== messageId);
+      const idx = this.pendingMessages.findIndex((m) => m.id === messageId);
+      if (idx >= 0) {
+        this.pendingMessages.splice(idx, 1);
+      }
       this.notifyListeners();
     } catch (error) {
       console.error('Failed to remove pending message:', error);
@@ -203,8 +238,9 @@ class ReactNativeMessageStore {
       const key = this.resolveConversationKey(peerId);
       if (key) {
         this.conversations.delete(key);
+        this.peerToConversationId.delete(peerId);
       }
-      await this.persist();
+      this.queuePersist();
       this.notifyListeners();
     } catch (error) {
       console.error('Failed to clear conversation:', error);
@@ -219,6 +255,11 @@ class ReactNativeMessageStore {
       this.conversations.clear();
       this.pendingMessages = [];
       this.deliveredMessages.clear();
+      this.peerToConversationId.clear();
+      if (this.persistTimer) {
+        clearTimeout(this.persistTimer);
+        this.persistTimer = null;
+      }
       await Promise.all([
         AsyncStorage.removeItem(CONVERSATIONS_STORAGE_KEY),
         AsyncStorage.removeItem(MESSAGES_STORAGE_KEY),
@@ -255,8 +296,13 @@ class ReactNativeMessageStore {
   /**
    * Get conversation ID from two node IDs
    */
-  private getConversationId(nodeA: string, nodeB: string): string {
-    return [nodeA, nodeB].sort().join(':');
+  private async getConversationId(nodeA: string, nodeB: string): Promise<string> {
+    const [first, second] = [nodeA, nodeB].sort();
+    const normalized = `${first}:${second}`;
+    return await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      normalized
+    );
   }
 
   private resolveConversationKey(peerIdOrConversationId: string): string | undefined {
@@ -264,16 +310,7 @@ class ReactNativeMessageStore {
       return peerIdOrConversationId;
     }
 
-    for (const [conversationId, thread] of this.conversations.entries()) {
-      if (
-        thread.peerId === peerIdOrConversationId ||
-        conversationId.split(':').includes(peerIdOrConversationId)
-      ) {
-        return conversationId;
-      }
-    }
-
-    return undefined;
+    return this.peerToConversationId.get(peerIdOrConversationId);
   }
 
   /**

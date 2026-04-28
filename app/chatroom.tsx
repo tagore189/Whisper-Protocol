@@ -1,5 +1,6 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
+import * as Crypto from "expo-crypto";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -12,9 +13,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useBleConnections } from '../src/connection/BleConnectionContext';
-import { useAppSettings } from '../src/core/AppSettingsContext';
-import { supabase } from '../src/storage/supabase';
+import { getMessagesWithPeer, saveMessage } from "../src/chat/msg/chatStore";
+import { useBleConnections } from "../src/connection/BleConnectionContext";
+import { useAppSettings } from "../src/core/AppSettingsContext";
+import { supabase } from "../src/storage/supabase";
+import type { MeshPacket } from "../src/connection/mesh/packet";
 
 function formatTime(ts: string): string {
   if (!ts) return "";
@@ -24,14 +27,37 @@ function formatTime(ts: string): string {
   });
 }
 
+type MessageStatus = "sent" | "delivered" | "read";
+
 type Message = {
   id: string;
+  chat_id: string;
   sender_device_id: string;
   receiver_device_id: string;
   content: string;
   created_at: string;
-  read_at: string | null; 
+  status: MessageStatus;
 };
+
+function toMeshPacket(message: Message): MeshPacket<{ text: string }> {
+  return {
+    id: message.id,
+    from: message.sender_device_id,
+    to: message.receiver_device_id,
+    ttl: 4,
+    timestamp: new Date(message.created_at).getTime(),
+    type: "TEXT",
+    payload: { text: message.content },
+  };
+}
+
+async function getChatId(deviceA: string, deviceB: string): Promise<string> {
+  const [first, second] = [deviceA, deviceB].sort();
+  return await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    `${first}:${second}`
+  );
+}
 
 export default function ChatRoomScreen() {
   const router = useRouter();
@@ -39,71 +65,134 @@ export default function ChatRoomScreen() {
     peerId: string;
     peerName: string;
   }>();
-  const { isConnected, getConnectionState } = useBleConnections();
+  const { isConnected } = useBleConnections();
   const { settings } = useAppSettings();
   const myId = settings.deviceId;
 
   const [messages, setMessages] = useState<Message[]>([]);
+  const [chatId, setChatId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const connectedBLE = peerId ? isConnected(peerId) : false;
-  const handshakeState = peerId ? getConnectionState(peerId) : "IDLE";
   const displayName = peerName || (peerId ? peerId.slice(-8) : "Unknown");
 
-  const markAsRead = async (msgs: Message[]) => {
-    const unreadIds = msgs.filter(m => m.receiver_device_id === myId && !m.read_at).map(m => m.id);
-    if (unreadIds.length > 0) {
-      await supabase.from("messages").update({ read_at: new Date().toISOString() }).in("id", unreadIds);
-    }
-  };
-
   const loadMessages = useCallback(async () => {
-    if (!peerId || !myId || !connectedBLE) return;
-    const { data } = await supabase
+    if (!chatId || !myId || !peerId) return;
+
+    const { data, error } = await supabase
       .from("messages")
       .select("*")
-      .or(`and(sender_device_id.eq.${myId},receiver_device_id.eq.${peerId}),and(sender_device_id.eq.${peerId},receiver_device_id.eq.${myId})`)
+      .eq("chat_id", chatId)
       .order("created_at", { ascending: true });
-    
-    if (data) {
-      setMessages(data);
-      markAsRead(data);
+
+    if (error) {
+      console.error("Failed to load remote messages:", error);
+      return;
     }
-  }, [connectedBLE, peerId, myId]);
+
+    const remoteMessages = (data || []) as Message[];
+    setMessages(remoteMessages);
+    await Promise.all(remoteMessages.map((message) => saveMessage(toMeshPacket(message))));
+  }, [chatId, myId, peerId]);
+
+  const ackMessageStatus = useCallback(
+    async (message: Message) => {
+      if (!myId || message.receiver_device_id !== myId) return;
+
+      const nextStatus: MessageStatus =
+        message.status === "sent" ? "delivered" : "read";
+      if (message.status === nextStatus) return;
+
+      const { error } = await supabase
+        .from("messages")
+        .update({ status: nextStatus })
+        .eq("id", message.id)
+        .eq("status", message.status);
+
+      if (error) {
+        console.error("Failed to ACK message:", error);
+      }
+    },
+    [myId]
+  );
+
+  const loadLocalMessages = useCallback(async () => {
+    if (!peerId || !myId || !chatId) return;
+
+    const localMessages = await getMessagesWithPeer(myId, peerId);
+    const formatted = localMessages.map(m => ({
+      id: m.id,
+      chat_id: chatId,
+      sender_device_id: m.from,
+      receiver_device_id: m.to,
+      content: m.payload?.text || JSON.stringify(m.payload),
+      created_at: new Date(m.timestamp).toISOString(),
+      status: 'sent' as MessageStatus, // local messages are sent
+    }));
+    setMessages(formatted);
+  }, [myId, peerId, chatId]);
 
   useEffect(() => {
-    loadMessages();
-  }, [loadMessages]);
+    if (!peerId || !myId) return;
+    let active = true;
+
+    (async () => {
+      const id = await getChatId(myId, peerId);
+      if (active) setChatId(id);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [myId, peerId]);
 
   useEffect(() => {
-    if (!peerId || !myId || !connectedBLE) return;
+    if (connectedBLE) {
+      loadMessages().catch((error) => {
+        console.error("Failed to refresh connected messages:", error);
+      });
+    }
+  }, [connectedBLE, loadMessages]);
+
+  useEffect(() => {
+    if (!connectedBLE) {
+      loadLocalMessages();
+    }
+  }, [connectedBLE, loadLocalMessages]);
+
+  useEffect(() => {
+    if (!peerId || !myId || !connectedBLE || !chatId) return;
 
     const channel = supabase
       .channel("messages_channel")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "messages" },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            const newMsg = payload.new as Message;
-            if ((newMsg.sender_device_id === myId && newMsg.receiver_device_id === peerId) ||
-                (newMsg.sender_device_id === peerId && newMsg.receiver_device_id === myId)) {
-              
-              setMessages((prev) => {
-                if (prev.find(m => m.id === newMsg.id)) return prev;
-                return [...prev, newMsg];
-              });
+        async (payload) => {
+          const newMsg = (payload.new || payload.old) as Message;
+          if (!newMsg) return;
+          if (
+            newMsg.chat_id !== chatId
+          ) {
+            return;
+          }
 
-              if (newMsg.receiver_device_id === myId) {
-                // mark as read over network
-                supabase.from("messages").update({ read_at: new Date().toISOString() }).eq("id", newMsg.id).then();
-              }
+          if (payload.eventType === "INSERT") {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              return [...prev, newMsg];
+            });
+            await saveMessage(toMeshPacket(newMsg));
+
+            if (newMsg.receiver_device_id === myId && newMsg.status === "sent") {
+              await ackMessageStatus(newMsg);
             }
-          } else if (payload.eventType === "UPDATE") {
-             const updated = payload.new as Message;
-             setMessages((prev) => prev.map(m => m.id === updated.id ? updated : m));
+            return;
+          }
+
+          if (payload.eventType === "UPDATE") {
+            setMessages((prev) => prev.map((m) => (m.id === newMsg.id ? newMsg : m)));
           }
         }
       )
@@ -112,26 +201,33 @@ export default function ChatRoomScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [connectedBLE, peerId, myId]);
+  }, [ackMessageStatus, chatId, connectedBLE, myId, peerId]);
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || !myId || !peerId || sending || !connectedBLE) return;
+    if (!text || !myId || !peerId || !connectedBLE || !chatId) return;
 
-    setInput("");
-    setSending(true);
-
-    const newMsg = {
+    const messageId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const timestamp = new Date().toISOString();
+    const localMessage: Message = {
+      id: messageId,
+      chat_id: chatId,
       sender_device_id: myId,
       receiver_device_id: peerId,
       content: text,
+      status: "sent",
+      created_at: timestamp,
     };
 
-    const { error } = await supabase.from("messages").insert(newMsg);
+    setMessages((prev) => [...prev, localMessage]);
+    setInput("");
+    await saveMessage(toMeshPacket(localMessage));
+
+    const { error } = await supabase.from("messages").insert(localMessage);
     if (error) {
-       console.error("Failed to send message", error);
+      console.error("Failed to send message", error);
+      setMessages((prev) => prev.filter((message) => message.id !== messageId));
     }
-    setSending(false);
   };
 
   const goBack = useCallback(() => router.back(), [router]);
@@ -154,7 +250,7 @@ export default function ChatRoomScreen() {
       <View style={styles.root}>
         <View style={styles.notConnected}>
           <Text style={styles.notConnectedText}>
-            Handshake incomplete. Current state: {handshakeState}
+            Connecting...
           </Text>
           <Pressable style={styles.backBtnLarge} onPress={goBack}>
             <Text style={styles.backBtnText}>Back to chats</Text>
@@ -181,7 +277,7 @@ export default function ChatRoomScreen() {
               ]}
             />
             <Text style={styles.secureText}>
-              {connectedBLE ? "BLE CONNECTED" : "BLE NOT CONNECTED"}
+              {connectedBLE ? "Connected" : "Connecting"}
             </Text>
           </View>
         </View>
@@ -192,18 +288,14 @@ export default function ChatRoomScreen() {
         ref={scrollRef}
         contentContainerStyle={styles.messages}
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={() =>
-          scrollRef.current?.scrollToEnd({ animated: true })
-        }
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
       >
         {messages.length > 0 && (
-          <Text style={styles.meta}>
-            {new Date(messages[0].created_at).toLocaleDateString()}
-          </Text>
+          <Text style={styles.meta}>{new Date(messages[0].created_at).toLocaleDateString()}</Text>
         )}
         {messages.map((m) => {
           const fromMe = m.sender_device_id === myId;
-          const statusText = m.read_at ? "Read" : "Delivered";
+          const statusText = m.status === "sent" ? "✓" : "✓✓";
 
           return (
             <View key={m.id} style={[styles.row, fromMe && styles.rowRight]}>
@@ -211,23 +303,12 @@ export default function ChatRoomScreen() {
                 <Text style={[styles.sender, fromMe && styles.alignRight]}>
                   {fromMe ? "You" : displayName}
                 </Text>
-                <View
-                  style={fromMe ? styles.bubbleSent : styles.bubbleReceived}
-                >
+                <View style={fromMe ? styles.bubbleSent : styles.bubbleReceived}>
                   <Text style={styles.message}>{m.content}</Text>
                 </View>
                 <View style={[styles.timeRow, fromMe && styles.timeRowRight]}>
                   <Text style={styles.time}>{formatTime(m.created_at)}</Text>
-                  {fromMe && (
-                    <Text style={styles.statusText}>{statusText}</Text>
-                  )}
-                  {fromMe && (
-                    <MaterialIcons
-                      name={m.read_at ? "done-all" : "check"}
-                      size={14}
-                      color={m.read_at ? "#6961ff" : "rgba(255,255,255,0.7)"}
-                    />
-                  )}
+                  {fromMe && <Text style={styles.statusText}>{statusText}</Text>}
                 </View>
               </View>
             </View>
@@ -246,17 +327,14 @@ export default function ChatRoomScreen() {
         />
 
         <Pressable
-          style={[
-            styles.sendBtn,
-            (!input.trim() || sending) && styles.sendBtnDisabled,
-          ]}
+          style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
           onPress={sendMessage}
-          disabled={!input.trim() || sending}
+          disabled={!input.trim()}
         >
           <MaterialCommunityIcons
             name="send"
             size={20}
-            color={input.trim() && !sending ? "#fff" : "#6b7280"}
+            color={input.trim() ? "#fff" : "#6b7280"}
           />
         </Pressable>
       </BlurView>
@@ -273,7 +351,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingTop: Platform.OS === "ios" ? 50 : 16,
   },
   iconBtn: {
     padding: 4,
@@ -292,15 +370,104 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  secureText: {
-    fontSize: 10,
-    color: "#908dce",
-    letterSpacing: 1,
-  },
   onlineDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 8,
+  },
+  secureText: {
+    color: "#d1d5db",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  messages: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  meta: {
+    color: "#9ca3af",
+    fontSize: 12,
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  row: {
+    marginBottom: 16,
+    flexDirection: "row",
+  },
+  rowRight: {
+    justifyContent: "flex-end",
+  },
+  sender: {
+    color: "#a5b4fc",
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  alignRight: {
+    textAlign: "right",
+  },
+  bubbleSent: {
+    backgroundColor: "#4f46e5",
+    borderRadius: 18,
+    padding: 12,
+    maxWidth: "80%",
+  },
+  bubbleReceived: {
+    backgroundColor: "#27233f",
+    borderRadius: 18,
+    padding: 12,
+    maxWidth: "80%",
+  },
+  message: {
+    color: "#fff",
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  timeRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  timeRowRight: {
+    justifyContent: "flex-end",
+  },
+  time: {
+    color: "#9ca3af",
+    fontSize: 12,
+  },
+  statusText: {
+    color: "#9ca3af",
+    fontSize: 12,
+    marginRight: 4,
+  },
+  footer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 12,
+  },
+  input: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    color: "#fff",
+    paddingHorizontal: 16,
+  },
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#6366f1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sendBtnDisabled: {
+    backgroundColor: "#1f2937",
   },
   notConnected: {
     flex: 1,
@@ -309,111 +476,19 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   notConnectedText: {
-    color: "#9ca3af",
-    fontSize: 16,
-    marginBottom: 16,
+    color: "#fff",
+    fontSize: 18,
+    textAlign: "center",
+    marginBottom: 24,
   },
   backBtnLarge: {
-    backgroundColor: "#6961ff",
-    paddingHorizontal: 24,
+    backgroundColor: "#4f46e5",
     paddingVertical: 12,
-    borderRadius: 12,
+    paddingHorizontal: 24,
+    borderRadius: 999,
   },
   backBtnText: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  messages: {
-    padding: 16,
-    gap: 16,
-    paddingBottom: 24,
-  },
-  meta: {
-    textAlign: "center",
-    color: "#908dce",
-    fontSize: 12,
-    opacity: 0.6,
-    marginBottom: 8,
-  },
-  row: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  rowRight: {
-    justifyContent: "flex-end",
-  },
-  sender: {
-    fontSize: 11,
-    color: "#908dce",
-    marginBottom: 4,
-  },
-  alignRight: {
-    textAlign: "right",
-  },
-  bubbleReceived: {
-    backgroundColor: "#22204b",
-    padding: 12,
-    borderRadius: 16,
-    maxWidth: 260,
-  },
-  bubbleSent: {
-    backgroundColor: "#6961ff",
-    padding: 12,
-    borderTopLeftRadius: 16,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-    borderTopRightRadius: 4,
-    maxWidth: 260,
-  },
-  message: {
-    color: "#fff",
-    fontSize: 15,
-    lineHeight: 20,
-  },
-  timeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 4,
-  },
-  timeRowRight: {
-    justifyContent: "flex-end",
-  },
-  time: {
-    fontSize: 10,
-    color: "#aaa",
-  },
-  statusText: {
-    fontSize: 10,
-    color: "#aaa",
-    marginRight: 2,
-  },
-  footer: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
-    gap: 10,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: "#22204b",
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: "#fff",
-    fontSize: 15,
-  },
-  sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#6961ff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sendBtnDisabled: {
-    backgroundColor: "rgba(255,255,255,0.1)",
+    fontWeight: "700",
   },
 });
