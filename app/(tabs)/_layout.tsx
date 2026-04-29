@@ -37,11 +37,11 @@ export default function TabsLayout() {
       />
 
       <Tabs.Screen
-        name="settings"
+        name="radar"
         options={{
-          title: "Settings",
+          title: "Radar",
           tabBarIcon: ({ color }: { color: string }) => (
-            <MaterialIcons name="settings" size={22} color={color} />
+            <MaterialIcons name="radar" size={22} color={color} />
           ),
         }}
       />

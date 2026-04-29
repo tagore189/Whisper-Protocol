@@ -1,5 +1,5 @@
 import { Device } from "react-native-ble-plx";
-import { getOrCreateIdentity } from '../../co../../core/identity/identity';
+import { getOrCreateIdentity } from '../../core/identity/identity';
 
 import { getBleManager } from "./bleManager";
 

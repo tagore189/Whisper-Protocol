@@ -14,10 +14,11 @@ import {
   View,
 } from "react-native";
 import { getMessagesWithPeer, saveMessage } from "../src/chat/msg/chatStore";
+import { onMessageReceived, sendMessageBLE } from "../src/connection/ble/bleMessaging";
 import { useBleConnections } from "../src/connection/BleConnectionContext";
+import type { MeshPacket } from "../src/connection/mesh/packet";
 import { useAppSettings } from "../src/core/AppSettingsContext";
 import { supabase } from "../src/storage/supabase";
-import type { MeshPacket } from "../src/connection/mesh/packet";
 
 function formatTime(ts: string): string {
   if (!ts) return "";
@@ -77,61 +78,59 @@ export default function ChatRoomScreen() {
   const connectedBLE = peerId ? isConnected(peerId) : false;
   const displayName = peerName || (peerId ? peerId.slice(-8) : "Unknown");
 
-  const loadMessages = useCallback(async () => {
-    if (!chatId || !myId || !peerId) return;
-
-    const { data, error } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("chat_id", chatId)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      console.error("Failed to load remote messages:", error);
-      return;
-    }
-
-    const remoteMessages = (data || []) as Message[];
-    setMessages(remoteMessages);
-    await Promise.all(remoteMessages.map((message) => saveMessage(toMeshPacket(message))));
-  }, [chatId, myId, peerId]);
-
-  const ackMessageStatus = useCallback(
-    async (message: Message) => {
-      if (!myId || message.receiver_device_id !== myId) return;
-
-      const nextStatus: MessageStatus =
-        message.status === "sent" ? "delivered" : "read";
-      if (message.status === nextStatus) return;
-
-      const { error } = await supabase
-        .from("messages")
-        .update({ status: nextStatus })
-        .eq("id", message.id)
-        .eq("status", message.status);
-
-      if (error) {
-        console.error("Failed to ACK message:", error);
-      }
-    },
-    [myId]
-  );
-
-  const loadLocalMessages = useCallback(async () => {
+  const refreshMessages = useCallback(async () => {
     if (!peerId || !myId || !chatId) return;
 
+    // 1. Load from local SQLite first (Source of Truth)
     const localMessages = await getMessagesWithPeer(myId, peerId);
     const formatted = localMessages.map(m => ({
       id: m.id,
       chat_id: chatId,
       sender_device_id: m.from,
       receiver_device_id: m.to,
-      content: m.payload?.text || JSON.stringify(m.payload),
+      content: m.payload?.text || '',
       created_at: new Date(m.timestamp).toISOString(),
-      status: 'sent' as MessageStatus, // local messages are sent
+      status: 'sent' as MessageStatus,
     }));
+    
     setMessages(formatted);
-  }, [myId, peerId, chatId]);
+
+    // 2. If online/connected, fetch from Supabase to sync
+    if (connectedBLE) {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .or(`and(sender_device_id.eq.${myId},receiver_device_id.eq.${peerId}),and(sender_device_id.eq.${peerId},receiver_device_id.eq.${myId})`)
+        .order("created_at", { ascending: true });
+
+      if (!error && data) {
+        const remoteMessages = data as Message[];
+        // Save new remote messages to local DB
+        let hasNew = false;
+        for (const msg of remoteMessages) {
+          const exists = localMessages.some(lm => lm.id === msg.id);
+          if (!exists) {
+            await saveMessage(toMeshPacket(msg));
+            hasNew = true;
+          }
+        }
+        
+        if (hasNew) {
+          // Re-load if we found new ones
+          const updatedLocal = await getMessagesWithPeer(myId, peerId);
+          setMessages(updatedLocal.map(m => ({
+            id: m.id,
+            chat_id: chatId,
+            sender_device_id: m.from,
+            receiver_device_id: m.to,
+            content: m.payload?.text || '',
+            created_at: new Date(m.timestamp).toISOString(),
+            status: 'sent' as MessageStatus,
+          })));
+        }
+      }
+    }
+  }, [chatId, myId, peerId, connectedBLE]);
 
   useEffect(() => {
     if (!peerId || !myId) return;
@@ -148,18 +147,8 @@ export default function ChatRoomScreen() {
   }, [myId, peerId]);
 
   useEffect(() => {
-    if (connectedBLE) {
-      loadMessages().catch((error) => {
-        console.error("Failed to refresh connected messages:", error);
-      });
-    }
-  }, [connectedBLE, loadMessages]);
-
-  useEffect(() => {
-    if (!connectedBLE) {
-      loadLocalMessages();
-    }
-  }, [connectedBLE, loadLocalMessages]);
+    refreshMessages();
+  }, [refreshMessages]);
 
   useEffect(() => {
     if (!peerId || !myId || !connectedBLE || !chatId) return;
@@ -173,26 +162,27 @@ export default function ChatRoomScreen() {
           const newMsg = (payload.new || payload.old) as Message;
           if (!newMsg) return;
           if (
-            newMsg.chat_id !== chatId
+            !(
+              (newMsg.sender_device_id === myId && newMsg.receiver_device_id === peerId) ||
+              (newMsg.sender_device_id === peerId && newMsg.receiver_device_id === myId)
+            )
           ) {
             return;
           }
 
           if (payload.eventType === "INSERT") {
+            // Save to local DB first
+            await saveMessage(toMeshPacket(newMsg));
+            
             setMessages((prev) => {
               if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
+              return [...prev, { ...newMsg, chat_id: chatId }];
             });
-            await saveMessage(toMeshPacket(newMsg));
-
-            if (newMsg.receiver_device_id === myId && newMsg.status === "sent") {
-              await ackMessageStatus(newMsg);
-            }
             return;
           }
 
           if (payload.eventType === "UPDATE") {
-            setMessages((prev) => prev.map((m) => (m.id === newMsg.id ? newMsg : m)));
+            setMessages((prev) => prev.map((m) => (m.id === newMsg.id ? { ...newMsg, chat_id: chatId } : m)));
           }
         }
       )
@@ -201,14 +191,60 @@ export default function ChatRoomScreen() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [ackMessageStatus, chatId, connectedBLE, myId, peerId]);
+  }, [chatId, connectedBLE, myId, peerId]);
+
+  // Listen for incoming BLE messages (simulated)
+  useEffect(() => {
+    if (!peerId || !myId) return;
+
+    const handleIncoming = async (packet: MeshPacket) => {
+      // Only process messages for this peer
+      if (!((packet.from === peerId && packet.to === myId) || 
+            (packet.from === myId && packet.to === peerId))) {
+        return;
+      }
+
+      // Ignore ACK packets in UI
+      if (packet.type === 'ACK') {
+        console.log('[chatroom] Received ACK');
+        return;
+      }
+
+      console.log('[chatroom] Received incoming message:', packet.id);
+      
+      // Refresh messages from local DB
+      await refreshMessages();
+    };
+
+    onMessageReceived(handleIncoming);
+
+    return () => {
+      // Cleanup: remove listener (simplified - in production use a proper event emitter)
+    };
+  }, [peerId, myId, refreshMessages]);
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || !myId || !peerId || !connectedBLE || !chatId) return;
+    if (!text || !myId || !peerId || !chatId) return;
 
-    const messageId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const timestamp = new Date().toISOString();
+    const messageId = Crypto.randomUUID();
+    const timestamp = Date.now();
+
+    // Create mesh packet for BLE transmission
+    const packet: MeshPacket = {
+      id: messageId,
+      from: myId,
+      to: peerId,
+      ttl: 4,
+      timestamp,
+      type: "TEXT",
+      payload: { text },
+    };
+
+    // 1. Save locally FIRST (fix disappearing messages)
+    await saveMessage(packet);
+
+    // 2. Update UI instantly (optimistic update)
     const localMessage: Message = {
       id: messageId,
       chat_id: chatId,
@@ -216,17 +252,18 @@ export default function ChatRoomScreen() {
       receiver_device_id: peerId,
       content: text,
       status: "sent",
-      created_at: timestamp,
+      created_at: new Date(timestamp).toISOString(),
     };
 
     setMessages((prev) => [...prev, localMessage]);
     setInput("");
-    await saveMessage(toMeshPacket(localMessage));
 
-    const { error } = await supabase.from("messages").insert(localMessage);
-    if (error) {
-      console.error("Failed to send message", error);
-      setMessages((prev) => prev.filter((message) => message.id !== messageId));
+    // 3. Send via simulated BLE transport
+    try {
+      await sendMessageBLE(packet);
+      console.log("[chatroom] Message sent via BLE:", messageId);
+    } catch (error) {
+      console.error("[chatroom] Failed to send via BLE:", error);
     }
   };
 

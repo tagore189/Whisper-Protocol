@@ -23,7 +23,7 @@ export async function saveMessage(packet: MeshPacket) {
     payload: packet.payload,
     content,
     type: packet.type,
-    status: 'sent',
+    status: packet.type === 'ACK' ? 'delivered' : 'sent',
   };
 
   // Check if message already exists
@@ -108,4 +108,22 @@ export async function getMessagesWithPeer(
       type: (message.type as PacketType | undefined) ?? 'TEXT',
       payload: message.payload,
     }));
+}
+
+export async function updateMessageStatus(
+  messageId: string,
+  status: 'sent' | 'delivered' | 'read'
+) {
+  const msg = await localDatabase.getMessage(messageId);
+  if (!msg) {
+    console.warn(`[chatStore] Message ${messageId} not found for status update`);
+    return;
+  }
+
+  await localDatabase.saveMessage({
+    ...msg,
+    status,
+  });
+
+  console.log(`[chatStore] Updated message ${messageId} status to ${status}`);
 }

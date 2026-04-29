@@ -83,16 +83,27 @@ export default function NetworkScreen() {
 
   useEffect(() => {
     if (!settings.deviceId) return;
-    const channel = supabase
-      .channel("network_requests_updates")
+
+    // Use a unique channel name per device to avoid subscription conflicts
+    const channelName = `network_requests_${settings.deviceId}`;
+    const channel = supabase.channel(channelName);
+    
+    channel
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "connection_requests" },
-        () => {
+        (payload) => {
+          console.log("[network] change detected:", payload.eventType);
           fetchRequests();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          console.log(`[network] successfully subscribed to ${channelName}`);
+        } else {
+          console.warn(`[network] subscription status: ${status}`);
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);

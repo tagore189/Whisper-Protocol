@@ -60,7 +60,7 @@ const BleConnectionContext = createContext<BleConnectionContextValue | null>(nul
 const HANDSHAKE_TIMEOUT_MS = 12_000;
 const HANDSHAKE_MAX_RETRIES = 2;
 const RECONNECT_DELAY_MS = 5_000;
-const STALE_CONNECTION_MS = 30_000;
+const STALE_CONNECTION_MS = 600_000; // 10 minutes instead of 30s
 
 type RetrySpec = {
   rowId: string;
@@ -187,7 +187,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         )
         .or(buildConnectionQuery(peerId))
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.warn('Failed to query existing connection row:', error);
@@ -214,7 +214,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         .select(
           '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
         )
-        .single();
+        .maybeSingle();
       if (result.error) {
         return { error: result.error, data: null };
       }
@@ -523,7 +523,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
           .select(
             '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
           )
-          .single();
+          .maybeSingle();
 
         if (error) throw error;
         await processRow(data as ConnectionRequestRow);
@@ -540,7 +540,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         .select(
           '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
         )
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
       await processRow(data as ConnectionRequestRow);
@@ -573,7 +573,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         .select(
           '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
         )
-        .single();
+        .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
         // PGRST116 is returned when no rows are updated due to status mismatch.
@@ -591,7 +591,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
           '*, sender:users!connection_requests_sender_device_id_fkey(device_name), receiver:users!connection_requests_receiver_device_id_fkey(device_name)'
         )
         .eq('id', requestId)
-        .single();
+        .maybeSingle();
 
       if (fallback.error) throw fallback.error;
       if (fallback.data) {
