@@ -5,6 +5,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useBleConnections } from '../../src/connection/BleConnectionContext';
 import { useBleScan } from '../../src/discovery/ble/useBleScan';
 import { getOrCreateIdentity } from '../../src/core/identity_v2/identity';
+import { getDisplayName } from '../../src/connection/ble/bleTransport';
 
 function formatNodeLabel(nodeId: string): string {
   if (nodeId.length <= 12) {
@@ -115,8 +116,8 @@ export default function MeshVisualizationScreen() {
                   <MaterialIcons name="devices" size={18} color="#6961ff" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.nodeName} numberOfLines={1}>{node.name}</Text>
-                  <Text style={styles.nodeId}>{formatNodeLabel(node.id)}</Text>
+                  <Text style={styles.nodeName} numberOfLines={1}>{getDisplayName(node as any)}</Text>
+                  <Text style={styles.nodeId}>ID: {node.id.slice(-4)}</Text>
                   <View style={styles.metaRow}>
                     <Text style={styles.nodeMeta}>
                       RSSI {node.rssi ?? 'N/A'}

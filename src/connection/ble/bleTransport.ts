@@ -70,6 +70,19 @@ function handleDisconnect(error: any, deviceId: string) {
 // Map custom deviceId to BLE device.id
 export const bleDeviceMap: Record<string, string> = {};
 
+export function getDisplayName(device: { name?: string | null; localName?: string | null; id: string }): string {
+  if (device.name && device.name.trim().length > 0) {
+    return device.name;
+  }
+  if (device.localName && device.localName.trim().length > 0) {
+    return device.localName;
+  }
+  if (device.id) {
+    return `Nearby Device (${device.id.slice(-4)})`;
+  }
+  return "Unknown Device";
+}
+
 /**
  * Initialize and get BLE Manager
  */
@@ -361,37 +374,45 @@ export async function connectViaQRPayload(payload: {
     device.name === payload.advertisedName ||
     (device as any).localName === payload.advertisedName;
 
-  // 4a. Primary scan: filtered by serviceUUID, collect candidates
+  // 4. Smart scan: collect candidates, then select best match
   let targetBleId: string | null = null;
-  const candidates = new Map<string, Device>();
-  console.log('[BLE] QR primary scan started (serviceUUID filter):', payload.advertisedName);
 
+  type Candidate = { id: string; name: string | null; localName: string | null; rssi: number | null; device: Device };
+  const candidates: Candidate[] = [];
+  const seenIds = new Set<string>();
+
+  console.log('[BLE] QR scan started. Looking for:', payload.advertisedName, 'serviceUUID:', payload.serviceUUID);
+
+  // 4a. Primary scan: filtered by serviceUUID, 2s collection window
   try {
     targetBleId = await new Promise<string>((resolve, reject) => {
       const scanTimer = setTimeout(() => {
         manager.stopDeviceScan();
-        if (candidates.size === 1) {
-          const [onlyId] = candidates.keys();
-          console.log('[BLE] Only one candidate found, resolving:', onlyId);
-          resolve(onlyId);
-        } else {
-          reject(new Error('__primary_timeout__'));
-        }
-      }, 2000); // 2 second collection window
+        resolve('__collection_done__');
+      }, 2000);
 
       manager.startDeviceScan([payload.serviceUUID], { allowDuplicates: false }, (error, device) => {
-        if (error) { 
-          manager.stopDeviceScan(); 
+        if (error) {
+          manager.stopDeviceScan();
           clearTimeout(scanTimer);
-          reject(error); 
-          return; 
+          reject(error);
+          return;
         }
-        if (device) {
-          console.log('[BLE] Device found (primary):', device.name, device.id);
-          candidates.set(device.id, device);
+        if (device && !seenIds.has(device.id)) {
+          seenIds.add(device.id);
+          const entry: Candidate = {
+            id: device.id,
+            name: device.name,
+            localName: (device as any).localName || null,
+            rssi: device.rssi,
+            device,
+          };
+          candidates.push(entry);
+          console.log('[BLE] Candidate found (primary):', entry.name, entry.localName, entry.id, 'RSSI:', entry.rssi);
 
+          // Instant resolve on exact name match
           if (isNameMatch(device)) {
-            console.log('[BLE] Exact name matched (primary):', device.name, device.id);
+            console.log('[BLE] Exact name match! Connecting immediately:', device.id);
             manager.stopDeviceScan();
             clearTimeout(scanTimer);
             resolve(device.id);
@@ -400,23 +421,46 @@ export async function connectViaQRPayload(payload: {
       });
     });
   } catch (e: any) {
-    if (e?.message !== '__primary_timeout__') throw e;
-    console.log(`[BLE] Primary scan ended. Candidates found: ${candidates.size}`);
-    if (candidates.size > 1) {
-      throw new Error('Multiple devices found but none matched the exact QR name. Please try again.');
+    try { manager.stopDeviceScan(); } catch (_) {}
+    throw e;
+  }
+
+  // 4b. Select best candidate from collection
+  if (targetBleId === '__collection_done__') {
+    targetBleId = null;
+    console.log(`[BLE] Primary scan complete. Candidates: ${candidates.length}`);
+    candidates.forEach(c => console.log(`  [BLE]   - ${c.name || c.localName || '(null)'} id=${c.id} rssi=${c.rssi}`));
+
+    if (candidates.length === 1) {
+      // Step 2: Single candidate — connect directly
+      targetBleId = candidates[0].id;
+      console.log('[BLE] Single candidate, selecting:', targetBleId);
+    } else if (candidates.length > 1) {
+      // Step 1 (re-check): Exact name match among collected candidates
+      const exactMatch = candidates.find(c =>
+        c.name === payload.advertisedName || c.localName === payload.advertisedName
+      );
+      if (exactMatch) {
+        targetBleId = exactMatch.id;
+        console.log('[BLE] Exact name match from candidates:', targetBleId);
+      } else {
+        // Step 3: Choose strongest signal (RSSI)
+        const sorted = [...candidates].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999));
+        targetBleId = sorted[0].id;
+        console.log('[BLE] No exact match. Selecting strongest RSSI:', targetBleId, 'RSSI:', sorted[0].rssi);
+      }
     }
   }
 
-  // 4b. Fallback scan: no UUID filter, manual name+UUID check
-  if (!targetBleId && candidates.size === 0) {
-    console.log('[BLE] QR fallback scan started (no filter)');
+  // 4c. Fallback scan: no UUID filter, 4s timeout (only if no candidates found)
+  if (!targetBleId && candidates.length === 0) {
+    console.log('[BLE] QR fallback scan started (no UUID filter)');
     try {
       targetBleId = await withTimeout(
         new Promise<string>((resolve, reject) => {
           manager.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
             if (error) { manager.stopDeviceScan(); reject(error); return; }
             if (device) {
-              console.log('[BLE] Device found (fallback):', device.name, device.id);
               const uuidMatch = (device.serviceUUIDs ?? []).some(
                 (u) => u.toLowerCase() === payload.serviceUUID.toLowerCase()
               );
@@ -428,8 +472,8 @@ export async function connectViaQRPayload(payload: {
             }
           });
         }),
-        5000,
-        'Device not found. Make sure the other phone is showing QR and Bluetooth is on.'
+        4000,
+        'No nearby device found. Make sure the other phone is showing QR and Bluetooth is on.'
       );
     } catch (e) {
       try { manager.stopDeviceScan(); } catch (_) {}
@@ -438,8 +482,10 @@ export async function connectViaQRPayload(payload: {
   }
 
   if (!targetBleId) {
-    throw new Error('Device not found. Make sure the other phone is showing QR and Bluetooth is on.');
+    throw new Error('No nearby device found. Make sure the other phone is showing QR and Bluetooth is on.');
   }
+
+  console.log('[BLE] Selected device:', targetBleId);
 
   // 5. Connect — 7 s
   console.log('[BLE] Connecting to matched device:', targetBleId);

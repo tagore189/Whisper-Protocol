@@ -4,6 +4,7 @@ import * as Crypto from "expo-crypto";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getMessagesWithPeer, saveMessage } from "../src/chat/msg/chatStore";
 import { onMessageReceived, sendMessageBLE } from "../src/connection/ble/bleMessaging";
 import { useBleConnections } from "../src/connection/BleConnectionContext";
@@ -63,9 +65,26 @@ async function getChatId(deviceA: string, deviceB: string): Promise<string> {
 
 export default function ChatRoomScreen() {
   const router = useRouter();
-  const { isConnected, getConnectionState, globalBleState, activePeer } = useBleConnections();
+  const { isConnected, getConnectionState, globalBleState, activePeer, setActivePeer } = useBleConnections();
   const { settings } = useAppSettings();
   const myId = settings.deviceId;
+
+  const [loadingPeer, setLoadingPeer] = useState(!activePeer.peerId);
+
+  // Safety fallback: if activePeer is null on mount, try loading from AsyncStorage
+  useEffect(() => {
+    if (activePeer.peerId) {
+      setLoadingPeer(false);
+      return;
+    }
+    AsyncStorage.getItem('activePeer').then(stored => {
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.peerId) setActivePeer(parsed);
+      }
+      setLoadingPeer(false);
+    }).catch(() => setLoadingPeer(false));
+  }, [activePeer.peerId, setActivePeer]);
 
   const peerId = activePeer.peerId;
   const peerName = activePeer.peerName;
@@ -194,6 +213,17 @@ export default function ChatRoomScreen() {
   };
 
   const goBack = useCallback(() => router.back(), [router]);
+
+  if (loadingPeer) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.notConnected}>
+          <ActivityIndicator size="large" color="#6366f1" />
+          <Text style={[styles.notConnectedText, { marginTop: 16 }]}>Loading...</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!peerId) {
     return (

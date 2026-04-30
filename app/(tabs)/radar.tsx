@@ -12,6 +12,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { getDisplayName } from "../../src/connection/ble/bleTransport";
 import { useBleConnections } from "../../src/connection/BleConnectionContext";
 import { useAppSettings } from "../../src/core/AppSettingsContext";
 import { bleService } from "../../src/discovery/ble/bleService";
@@ -191,24 +192,28 @@ export default function DeviceDiscoveryScreen() {
             </View>
           )}
 
-          {sortedDevices.map((device) => (
-            <DeviceCard
-              key={device.id}
-              name={device.name || `Device ${device.id.slice(-8)}`}
-              handshakeState={getConnectionState(device.id)}
-              distance={rssiToDistance(device.rssi)}
-              signal={rssiToSignal(device.rssi)}
-              signalColor={signalColor(device.rssi)}
-              lastSeen={timeAgo(device.lastSeen)}
-              rssi={device.rssi}
-              onConnect={() =>
-                handleConnect({
-                  id: device.id,
-                  name: device.name || `Device ${device.id.slice(-8)}`,
-                })
-              }
-            />
-          ))}
+          {sortedDevices.map((device) => {
+            const displayName = getDisplayName(device as any);
+            return (
+              <DeviceCard
+                key={device.id}
+                name={displayName}
+                shortId={device.id.slice(-4)}
+                handshakeState={getConnectionState(device.id)}
+                distance={rssiToDistance(device.rssi)}
+                signal={rssiToSignal(device.rssi)}
+                signalColor={signalColor(device.rssi)}
+                lastSeen={timeAgo(device.lastSeen)}
+                rssi={device.rssi}
+                onConnect={() =>
+                  handleConnect({
+                    id: device.id,
+                    name: displayName,
+                  })
+                }
+              />
+            );
+          })}
         </ScrollView>
       </View>
     </View>

@@ -48,7 +48,7 @@ export default function QrDiscoveryScreen() {
   // Stable advertised BLE peripheral name derived from device ID.
   // The scanner uses this name to match the exact peer device during BLE scan.
   const advertisedName = settings.deviceId
-    ? `FortiLink-${settings.deviceId.slice(-6)}`
+    ? `FortiLink-${settings.deviceName || settings.deviceId.slice(-4)}`
     : "FortiLink";
 
   const [qrPayload, setQrPayload] = useState(() =>

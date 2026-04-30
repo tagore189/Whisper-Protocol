@@ -166,6 +166,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
     if (packet.type === 'connection_accepted') {
       console.log(`[handshake] Connection accepted by ${peerId}`);
       setPeerState(peerId, peerName, 'CONNECTED');
+      setActivePeer({ peerId, peerName });
       return;
     }
 
@@ -450,8 +451,9 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   const handleAcceptRequest = async () => {
     if (!incomingRequest) return;
     const { packet } = incomingRequest;
-    
-    setPeerState(packet.from, packet.payload?.fromDeviceName || packet.from.slice(-8), 'CONNECTED');
+    const peerName = packet.payload?.fromDeviceName || packet.from.slice(-8);
+    setPeerState(packet.from, peerName, 'CONNECTED');
+    setActivePeer({ peerId: packet.from, peerName });
     
     const acceptPacket: MeshPacket = {
       id: Crypto.randomUUID(),
