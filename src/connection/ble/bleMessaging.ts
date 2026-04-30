@@ -130,10 +130,17 @@ export async function sendMessageReliable(packet: MeshPacket, initialRetries = 0
 }
 
 /**
- * Send message via real BLE transport (legacy, keeping for backwards compatibility)
+ * Send message via real BLE transport.
+ * Control packets bypass reliable queue. Normal messages use reliable messaging.
  */
 export async function sendMessageBLE(packet: MeshPacket): Promise<void> {
-  await sendMessageReliable(packet);
+  const controlTypes = ['ACK', 'connection_request', 'connection_accepted', 'connection_rejected', 'HANDSHAKE'];
+  if (controlTypes.includes(packet.type)) {
+    console.log(`[bleMessaging] Sending control packet directly: ${packet.type} (${packet.id})`);
+    await sendBLE(JSON.stringify(packet));
+  } else {
+    await sendMessageReliable(packet);
+  }
 }
 
 /**
@@ -162,8 +169,44 @@ export function initializeBLEMessaging(): void {
  */
 async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
   try {
-    // Handle Control messages
-    if (['HANDSHAKE', 'connection_request', 'connection_accepted', 'connection_rejected'].includes(packet.type)) {
+    const controlTypes = ['HANDSHAKE', 'connection_request', 'connection_accepted', 'connection_rejected'];
+
+    // Global Deduplication check for ALL packets
+    if (receivedMessageIds.has(packet.id)) {
+      console.log(`[bleMessaging] Ignoring duplicate message ${packet.id}`);
+      
+      // If it's a duplicate NORMAL message, we resend the ACK in case the peer missed it.
+      // We NEVER send ACKs for control packets or ACKs.
+      if (packet.type !== 'ACK' && !controlTypes.includes(packet.type)) {
+        const ackPacket: MeshPacket = {
+          id: `ack_${packet.id}`,
+          from: packet.to,
+          to: packet.from,
+          ttl: 4,
+          timestamp: Date.now(),
+          type: 'ACK',
+          payload: { messageId: packet.id },
+        };
+        
+        recentAckPackets.set(packet.id, ackPacket);
+        if (recentAckPackets.size > 20) {
+           const oldest = Array.from(recentAckPackets.keys())[0];
+           recentAckPackets.delete(oldest);
+        }
+        await sendMessageBLE(ackPacket);
+      }
+      return;
+    }
+    
+    receivedMessageIds.add(packet.id);
+    if (receivedMessageIds.size > 1000) {
+       const ids = Array.from(receivedMessageIds).slice(-500);
+       receivedMessageIds.clear();
+       ids.forEach(id => receivedMessageIds.add(id));
+    }
+
+    // Handle Control messages (no save, no ACK generated)
+    if (controlTypes.includes(packet.type)) {
       emitMessage(packet);
       return;
     }
@@ -185,47 +228,14 @@ async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
       return;
     }
 
-    // Deduplication check
-    if (receivedMessageIds.has(packet.id)) {
-      console.log(`[bleMessaging] Ignoring duplicate message ${packet.id}`);
-      if (packet.type !== 'ACK') {
-        // Send ACK back in case peer missed it
-        const ackPacket: MeshPacket = {
-          id: `ack_${packet.id}`,
-          from: packet.to,
-          to: packet.from,
-          ttl: 4,
-          timestamp: Date.now(),
-          type: 'ACK',
-          payload: { messageId: packet.id },
-        };
-        
-        recentAckPackets.set(packet.id, ackPacket);
-        if (recentAckPackets.size > 20) {
-           const oldest = Array.from(recentAckPackets.keys())[0];
-           recentAckPackets.delete(oldest);
-        }
-        
-        await sendMessageBLE(ackPacket);
-      }
-      return;
-    }
-    
-    receivedMessageIds.add(packet.id);
-    if (receivedMessageIds.size > 1000) {
-       const ids = Array.from(receivedMessageIds).slice(-500);
-       receivedMessageIds.clear();
-       ids.forEach(id => receivedMessageIds.add(id));
-    }
-
-    // Save received message
+    // NORMAL MESSAGES: Save received message
     console.log('[bleMessaging] Received message:', packet.id);
     await saveMessage(packet);
 
     // Emit to UI listeners
     emitMessage(packet);
 
-    // Auto-send ACK back
+    // Auto-send ACK back for NORMAL messages
     const ackPacket: MeshPacket = {
       id: `ack_${packet.id}`,
       from: packet.to,
