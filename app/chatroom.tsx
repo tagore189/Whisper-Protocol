@@ -18,7 +18,7 @@ import { onMessageReceived, sendMessageBLE } from "../src/connection/ble/bleMess
 import { useBleConnections } from "../src/connection/BleConnectionContext";
 import type { MeshPacket } from "../src/connection/mesh/packet";
 import { useAppSettings } from "../src/core/AppSettingsContext";
-// import { supabase } from "../src/storage/supabase";
+// Supabase has been removed in favor of fully offline BLE.
 
 
 function formatTime(ts: string): string {

@@ -11,7 +11,7 @@ import {
 } from "react-native";
 
 import { useAppSettings } from '../src/core/AppSettingsContext';
-// import { supabase } from '../src/storage/supabase';
+// Supabase has been removed in favor of fully offline BLE.
 import { localDatabase } from '../src/storage/localDatabase';
 
 export default function SettingsScreen() {
