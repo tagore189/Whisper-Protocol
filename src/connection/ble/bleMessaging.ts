@@ -55,6 +55,7 @@ export function initializeBLEMessaging(): void {
 
   // Listen for incoming BLE messages
   onBLEMessage((data: string) => {
+    console.log('[bleMessaging] Received raw BLE data:', data.substring(0, 100) + '...');
     try {
       const packet = JSON.parse(data) as MeshPacket;
       console.log('[bleMessaging] Received BLE message:', packet.id, packet.type);

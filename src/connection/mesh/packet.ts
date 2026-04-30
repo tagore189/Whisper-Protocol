@@ -1,4 +1,4 @@
-export type PacketType = 'TEXT' | 'VOICE_START' | 'VOICE_END' | 'ULTRASONIC';
+export type PacketType = 'TEXT' | 'VOICE_START' | 'VOICE_END' | 'ULTRASONIC' | 'ACK' | 'HANDSHAKE';
 
 export interface MeshPacket<T = any> {
   id: string;

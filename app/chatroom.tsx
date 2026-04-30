@@ -18,7 +18,8 @@ import { onMessageReceived, sendMessageBLE } from "../src/connection/ble/bleMess
 import { useBleConnections } from "../src/connection/BleConnectionContext";
 import type { MeshPacket } from "../src/connection/mesh/packet";
 import { useAppSettings } from "../src/core/AppSettingsContext";
-import { supabase } from "../src/storage/supabase";
+// import { supabase } from "../src/storage/supabase";
+
 
 function formatTime(ts: string): string {
   if (!ts) return "";
@@ -95,42 +96,8 @@ export default function ChatRoomScreen() {
     
     setMessages(formatted);
 
-    // 2. If online/connected, fetch from Supabase to sync
-    if (connectedBLE) {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .or(`and(sender_device_id.eq.${myId},receiver_device_id.eq.${peerId}),and(sender_device_id.eq.${peerId},receiver_device_id.eq.${myId})`)
-        .order("created_at", { ascending: true });
-
-      if (!error && data) {
-        const remoteMessages = data as Message[];
-        // Save new remote messages to local DB
-        let hasNew = false;
-        for (const msg of remoteMessages) {
-          const exists = localMessages.some(lm => lm.id === msg.id);
-          if (!exists) {
-            await saveMessage(toMeshPacket(msg));
-            hasNew = true;
-          }
-        }
-        
-        if (hasNew) {
-          // Re-load if we found new ones
-          const updatedLocal = await getMessagesWithPeer(myId, peerId);
-          setMessages(updatedLocal.map(m => ({
-            id: m.id,
-            chat_id: chatId,
-            sender_device_id: m.from,
-            receiver_device_id: m.to,
-            content: m.payload?.text || '',
-            created_at: new Date(m.timestamp).toISOString(),
-            status: 'sent' as MessageStatus,
-          })));
-        }
-      }
-    }
-  }, [chatId, myId, peerId, connectedBLE]);
+    // 2. Offline: No Supabase sync needed
+  }, [chatId, myId, peerId]);
 
   useEffect(() => {
     if (!peerId || !myId) return;
@@ -150,48 +117,6 @@ export default function ChatRoomScreen() {
     refreshMessages();
   }, [refreshMessages]);
 
-  useEffect(() => {
-    if (!peerId || !myId || !connectedBLE || !chatId) return;
-
-    const channel = supabase
-      .channel("messages_channel")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "messages" },
-        async (payload) => {
-          const newMsg = (payload.new || payload.old) as Message;
-          if (!newMsg) return;
-          if (
-            !(
-              (newMsg.sender_device_id === myId && newMsg.receiver_device_id === peerId) ||
-              (newMsg.sender_device_id === peerId && newMsg.receiver_device_id === myId)
-            )
-          ) {
-            return;
-          }
-
-          if (payload.eventType === "INSERT") {
-            // Save to local DB first
-            await saveMessage(toMeshPacket(newMsg));
-            
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, { ...newMsg, chat_id: chatId }];
-            });
-            return;
-          }
-
-          if (payload.eventType === "UPDATE") {
-            setMessages((prev) => prev.map((m) => (m.id === newMsg.id ? { ...newMsg, chat_id: chatId } : m)));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [chatId, connectedBLE, myId, peerId]);
 
   // Listen for incoming BLE messages (simulated)
   useEffect(() => {

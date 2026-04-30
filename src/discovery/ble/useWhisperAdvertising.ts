@@ -1,43 +1,41 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-    getAdvertiserError,
-    getAdvertiserState,
-    isAdvertiserAvailable,
-    startWhisperAdvertising,
-    stopWhisperAdvertising,
-    type AdvertiserState,
-} from "./bleAdvertiser";
+import { startGattServer } from "../../connection/ble/bleTransport";
+
+export type AdvertiserState =
+  | "unsupported"
+  | "idle"
+  | "advertising"
+  | "error";
 
 export function useWhisperAdvertising(options?: { autoStart?: boolean }) {
   const autoStart = options?.autoStart ?? true;
-  const [state, setState] = useState<AdvertiserState>(getAdvertiserState());
-  const [error, setError] = useState<string | null>(getAdvertiserError());
+  const [state, setState] = useState<AdvertiserState>("idle");
+  const [error, setError] = useState<string | null>(null);
 
   const start = useCallback(async (): Promise<boolean> => {
-    const ok = await startWhisperAdvertising();
-    setState(getAdvertiserState());
-    setError(getAdvertiserError());
+    setState("advertising");
+    const ok = await startGattServer();
+    if (!ok) {
+        setState("error");
+        setError("Failed to start GATT server");
+    }
     return ok;
   }, []);
 
   const stop = useCallback(async (): Promise<void> => {
-    await stopWhisperAdvertising();
-    setState(getAdvertiserState());
-    setError(getAdvertiserError());
+    // Stop logic if implemented in bleTransport
+    setState("idle");
   }, []);
 
   useEffect(() => {
-    if (!isAdvertiserAvailable() || !autoStart) return;
+    if (!autoStart) return;
     start();
-    return () => {
-      stopWhisperAdvertising();
-    };
-  }, [autoStart]);
+  }, [autoStart, start]);
 
   return {
     state,
     error,
-    available: isAdvertiserAvailable(),
+    available: true,
     start,
     stop,
   };

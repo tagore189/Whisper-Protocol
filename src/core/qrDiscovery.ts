@@ -11,13 +11,14 @@ export type QrDiscoveryPayload = {
   deviceName: string;
   sessionToken: string;
   timestamp: number;
+  bleId: string;
 };
 
 export type QrValidationResult =
   | { ok: true; payload: QrDiscoveryPayload }
   | { ok: false; reason: "invalid" | "self" | "expired"; message: string };
 
-export function createQrDiscoveryPayload(deviceId: string, deviceName: string): QrDiscoveryPayload {
+export function createQrDiscoveryPayload(deviceId: string, deviceName: string, bleId: string): QrDiscoveryPayload {
   return {
     type: QR_DISCOVERY_TYPE,
     version: QR_DISCOVERY_VERSION,
@@ -25,6 +26,7 @@ export function createQrDiscoveryPayload(deviceId: string, deviceName: string): 
     deviceName,
     sessionToken: Crypto.randomUUID(),
     timestamp: Date.now(),
+    bleId,
   };
 }
 
@@ -45,7 +47,9 @@ export function parseQrDiscoveryPayload(raw: string): QrDiscoveryPayload | null 
       typeof parsed.sessionToken !== "string" ||
       parsed.sessionToken.trim().length === 0 ||
       typeof parsed.timestamp !== "number" ||
-      !Number.isFinite(parsed.timestamp)
+      !Number.isFinite(parsed.timestamp) ||
+      typeof parsed.bleId !== "string" ||
+      parsed.bleId.trim().length === 0
     ) {
       return null;
     }
@@ -57,6 +61,7 @@ export function parseQrDiscoveryPayload(raw: string): QrDiscoveryPayload | null 
       deviceName: parsed.deviceName.trim(),
       sessionToken: parsed.sessionToken.trim(),
       timestamp: parsed.timestamp,
+      bleId: parsed.bleId.trim(),
     };
   } catch {
     return null;

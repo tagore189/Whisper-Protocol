@@ -24,6 +24,7 @@ import {
   type QrDiscoveryPayload,
   validateQrDiscoveryPayload,
 } from "../src/core/qrDiscovery";
+import { bleDeviceMap, connectedDevice } from "../src/connection/ble/bleTransport";
 
 type ScreenMode = "show" | "scan";
 
@@ -39,11 +40,18 @@ export default function QrDiscoveryScreen() {
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const screenMode = getScreenMode(mode);
   const { settings } = useAppSettings();
-  const { beginHandshake } = useBleConnections();
+  const { connectDirectlySkipHandshake } = useBleConnections();
   const [permission, requestPermission] = useCameraPermissions();
   const [isHandlingScan, setIsHandlingScan] = useState(false);
+  const getCurrentBleId = useCallback(() => {
+    if (connectedDevice) return connectedDevice.id;
+    // Last known device from bleDeviceMap, maybe for this device or just any known
+    const lastKnown = bleDeviceMap[settings.deviceName] || Object.values(bleDeviceMap)[0];
+    return lastKnown || "unknown_ble_id";
+  }, [settings.deviceName]);
+
   const [qrPayload, setQrPayload] = useState(() =>
-    createQrDiscoveryPayload(settings.deviceId, settings.deviceName)
+    createQrDiscoveryPayload(settings.deviceId, settings.deviceName, connectedDevice?.id || "unknown")
   );
   const [refreshTick, setRefreshTick] = useState(Date.now());
   const lastScanRef = useRef<{ signature: string; scannedAt: number } | null>(null);
@@ -54,8 +62,8 @@ export default function QrDiscoveryScreen() {
     if (!settings.deviceId) {
       return;
     }
-    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName));
-  }, [settings.deviceId, settings.deviceName]);
+    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, getCurrentBleId()));
+  }, [settings.deviceId, settings.deviceName, getCurrentBleId]);
 
   useEffect(() => {
     if (screenMode !== "show") {
@@ -71,9 +79,9 @@ export default function QrDiscoveryScreen() {
 
   useEffect(() => {
     if (screenMode === "show" && refreshTick - qrPayload.timestamp >= QR_DISCOVERY_EXPIRATION_MS) {
-      setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName));
+      setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, getCurrentBleId()));
     }
-  }, [qrPayload.timestamp, refreshTick, screenMode, settings.deviceId, settings.deviceName]);
+  }, [qrPayload.timestamp, refreshTick, screenMode, settings.deviceId, settings.deviceName, getCurrentBleId]);
 
   useEffect(
     () => () => {
@@ -86,7 +94,7 @@ export default function QrDiscoveryScreen() {
   );
 
   const regenerateQrCode = () => {
-    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName));
+    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, getCurrentBleId()));
     setRefreshTick(Date.now());
   };
 
@@ -133,17 +141,20 @@ export default function QrDiscoveryScreen() {
     setIsHandlingScan(true);
 
     try {
-      await beginHandshake({
+      await connectDirectlySkipHandshake({
         id: validation.payload.deviceId,
         name: validation.payload.deviceName,
+        bleId: validation.payload.bleId,
       });
-      Alert.alert("HELLO sent", `Handshake started with ${validation.payload.deviceName}.`);
-      router.back();
+      // Immediately navigate to chat instead of waiting for handshake completion
+      router.push(
+        (`/chatroom?peerId=${encodeURIComponent(validation.payload.deviceId)}&peerName=${encodeURIComponent(validation.payload.deviceName)}` as Href),
+      );
     } catch (error: any) {
       Alert.alert("Scan failed", error?.message || "Could not create a connection request from this QR code.");
       releaseScanLock(400);
     }
-  }, [beginHandshake, isHandlingScan, releaseScanLock, router, settings.deviceId]);
+  }, [connectDirectlySkipHandshake, isHandlingScan, releaseScanLock, router, settings.deviceId]);
 
   const expiresInMs = Math.max(0, QR_DISCOVERY_EXPIRATION_MS - (refreshTick - qrPayload.timestamp));
   const secondsRemaining = Math.ceil(expiresInMs / 1000);

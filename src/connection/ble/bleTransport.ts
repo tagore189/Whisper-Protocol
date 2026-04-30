@@ -1,16 +1,25 @@
-import { PermissionsAndroid, Platform } from 'react-native';
-import { BleManager, Device } from 'react-native-ble-plx';
+import { PermissionsAndroid, Platform, NativeModules, DeviceEventEmitter } from 'react-native';
+import { BleManager, Device, Subscription } from 'react-native-ble-plx';
+import { Buffer } from 'buffer';
+import { chunkMessage, processChunk } from './bleChunker';
+
+const { BLEPeripheral } = NativeModules;
 
 // BLE Constants
 export const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
 export const CHARACTERISTIC_UUID = 'abcd1234-5678-1234-5678-abcdef123456';
-export const DEVICE_NAME = 'FortiLink';
+export const DEVICE_NAME = 'FL';
 
 // BLE Manager instance
 let bleManager: BleManager | null = null;
-let connectedDevice: Device | null = null;
-let monitorUnsubscribe: (() => void) | null = null;
+export let connectedDevice: Device | null = null;
+let monitorUnsubscribe: Subscription | null = null;
 let messageListeners: ((data: string) => void)[] = [];
+let isServerRunning = false;
+let isStartingServer = false;
+
+// Map custom deviceId to BLE device.id
+export const bleDeviceMap: Record<string, string> = {};
 
 /**
  * Initialize and get BLE Manager
@@ -22,235 +31,256 @@ function getBleManager(): BleManager {
   return bleManager;
 }
 
+// Global handler for incoming peripheral data (when other devices write to us)
+const handlePeripheralWrite = (params: any) => {
+  if (params.data) {
+    try {
+      const bytes = Uint8Array.from(params.data);
+      const chunkString = Buffer.from(bytes).toString('utf8');
+      
+      // Process chunk
+      const fullMessage = processChunk(chunkString);
+      if (fullMessage) {
+        console.log('[bleTransport] Full message reassembled from chunks');
+        messageListeners.forEach(l => {
+          try { l(fullMessage); } catch (e) { console.error(e); }
+        });
+      }
+    } catch (err) {
+      console.error('[bleTransport] Failed to process incoming peripheral data:', err);
+    }
+  }
+};
+
+// Register listener using DeviceEventEmitter
+DeviceEventEmitter.addListener('onCharacteristicWrite', handlePeripheralWrite);
+
 /**
  * Request BLE permissions on Android
  */
 async function requestBlePermissions(): Promise<boolean> {
-  if (Platform.OS !== 'android') {
-    return true;
-  }
-
+  if (Platform.OS !== 'android') return true;
   try {
     const permissions = [
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
       PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
     ];
-
     const granted = await PermissionsAndroid.requestMultiple(permissions);
-    const allGranted = Object.values(granted).every(
-      (perm) => perm === PermissionsAndroid.RESULTS.GRANTED
-    );
-
-    if (allGranted) {
-      console.log('[bleTransport] All BLE permissions granted');
-    } else {
-      console.warn('[bleTransport] Some BLE permissions denied');
-    }
-
-    return allGranted;
+    return Object.values(granted).every((perm) => perm === PermissionsAndroid.RESULTS.GRANTED);
   } catch (error) {
-    console.error('[bleTransport] Failed to request permissions:', error);
     return false;
   }
 }
 
 /**
- * Scan for nearby FortiLink devices and connect
+ * Start GATT Server (Peripheral Mode)
  */
-export async function startScanAndConnect(): Promise<boolean> {
+export async function startGattServer(): Promise<boolean> {
+  if (isServerRunning || isStartingServer || Platform.OS !== 'android') {
+    console.log('[bleTransport] Skipping GATT server start:', { isServerRunning, isStartingServer, platform: Platform.OS });
+    return isServerRunning;
+  }
+  if (!BLEPeripheral) {
+    console.log('[bleTransport] BLEPeripheral not available');
+    return false;
+  }
+
+  isStartingServer = true;
   try {
+    console.log('[bleTransport] Requesting BLE permissions...');
     const hasPermissions = await requestBlePermissions();
+    console.log('[bleTransport] BLE permissions granted:', hasPermissions);
     if (!hasPermissions) {
-      console.warn('[bleTransport] Missing BLE permissions');
+      isStartingServer = false;
       return false;
     }
 
-    const manager = getBleManager();
-    console.log('[bleTransport] Starting scan for FortiLink devices...');
-
-    manager.startDeviceScan(null, { allowDuplicates: false }, async (error, device) => {
-      if (error) {
-        console.error('[bleTransport] Scan error:', error);
-        return;
-      }
-
-      if (!device) return;
-
-      // Filter for FortiLink devices
-      if (device.name === DEVICE_NAME && !connectedDevice) {
-        console.log('[bleTransport] Found FortiLink device:', device.id, device.name);
-
-        try {
-          manager.stopDeviceScan();
-          await connectToDevice(device);
-        } catch (connectError) {
-          console.error('[bleTransport] Connection failed:', connectError);
-          // Resume scanning
-          manager.startDeviceScan(null, { allowDuplicates: false }, (e, d) => {
-            if (e) return;
-            if (d && d.name === DEVICE_NAME && !connectedDevice) {
-              manager.stopDeviceScan();
-              connectToDevice(d).catch(console.error);
-            }
-          });
-        }
-      }
-    });
-
+    console.log('[bleTransport] Starting GATT Server setup...');
+    await BLEPeripheral.clean();
+    await BLEPeripheral.setName(DEVICE_NAME);
+    await BLEPeripheral.addService(SERVICE_UUID, true);
+    await BLEPeripheral.addCharacteristicToService(SERVICE_UUID, CHARACTERISTIC_UUID, 17, 26);
+    await BLEPeripheral.start();
+    
+    isServerRunning = true;
+    isStartingServer = false;
+    console.log('[bleTransport] GATT Server started and advertising');
     return true;
   } catch (error) {
-    console.error('[bleTransport] Failed to start scan:', error);
+    console.error('[bleTransport] Failed to start GATT Server:', error);
+    isStartingServer = false;
     return false;
   }
 }
 
 /**
- * Connect to a BLE device
+ * Automatically scan and connect to nearby Whisper devices
  */
-async function connectToDevice(device: Device): Promise<boolean> {
-  try {
-    console.log('[bleTransport] Connecting to device:', device.id);
+export async function startScanAndConnect(): Promise<void> {
+  const manager = getBleManager();
+  const subscription = manager.onStateChange((state) => {
+    if (state === 'PoweredOn') {
+      scanAndConnect();
+      subscription.remove();
+    }
+  }, true);
+}
 
-    const connected = await device.connect();
-    await connected.discoverAllServicesAndCharacteristics();
+function scanAndConnect() {
+  const manager = getBleManager();
+  console.log('[bleTransport] Scanning for Whisper devices...');
+  manager.startDeviceScan([SERVICE_UUID], null, async (error, device) => {
+    if (device) {
+      console.log('[bleTransport] Found potential peer:', device.name, device.id);
+      if (device.name) {
+         // store bleId whenever a device is discovered via scan
+         bleDeviceMap[device.name] = device.id; 
+      }
+    }
+  });
+}
+
+/**
+ * Connect directly to a device by ID
+ */
+export async function connectDirectly(deviceId: string): Promise<boolean> {
+  try {
+    const manager = getBleManager();
+    console.log('[bleTransport] Connecting directly to:', deviceId);
+    
+    const device = await manager.connectToDevice(deviceId);
+    await device.discoverAllServicesAndCharacteristics();
+    connectedDevice = device;
+    
+    startMonitoring();
+    return true;
+  } catch (error) {
+    console.error('[bleTransport] Direct connection failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Connect using explicit bleId
+ */
+export async function connectToDeviceById(bleId: string) {
+  try {
+    console.log("[BLE] Direct connecting to:", bleId);
+
+    const manager = getBleManager();
+
+    const device = await manager.connectToDevice(bleId, {
+      autoConnect: true,
+    });
+
+    const connected = await device.discoverAllServicesAndCharacteristics();
 
     connectedDevice = connected;
-    console.log('[bleTransport] Connected and discovered services');
 
-    // Start monitoring characteristic for incoming messages
+    console.log("[BLE] Connected via QR");
+
     startMonitoring();
 
     return true;
-  } catch (error) {
-    console.error('[bleTransport] Failed to connect to device:', error);
+  } catch (e) {
+    console.error("[BLE] Direct connect failed:", e);
+    startScanAndConnect();
     return false;
   }
 }
 
 /**
- * Start monitoring characteristic for incoming messages
+ * Start monitoring characteristic for incoming messages (Central Mode)
  */
 function startMonitoring(): void {
-  if (!connectedDevice || !bleManager) {
-    console.warn('[bleTransport] Cannot start monitoring - no connected device');
-    return;
-  }
+  if (!connectedDevice || !bleManager) return;
 
-  try {
-    console.log('[bleTransport] Starting characteristic monitoring');
-
-    monitorUnsubscribe = bleManager.monitorCharacteristicForDevice(
-      connectedDevice.id,
-      SERVICE_UUID,
-      CHARACTERISTIC_UUID,
-      (error, characteristic) => {
-        if (error) {
-          console.error('[bleTransport] Monitoring error:', error);
-          return;
-        }
-
-        if (characteristic?.value) {
-          try {
-            // Decode base64 message
-            const decodedData = Buffer.from(characteristic.value, 'base64');
-            const jsonString = decodedData.toString('utf8');
-            console.log('[bleTransport] Received message:', jsonString.substring(0, 50) + '...');
-
-            // Emit to listeners
-            messageListeners.forEach((listener) => {
-              try {
-                listener(jsonString);
-              } catch (error) {
-                console.error('[bleTransport] Listener error:', error);
-              }
-            });
-          } catch (decodeError) {
-            console.error('[bleTransport] Failed to decode message:', decodeError);
+  monitorUnsubscribe = bleManager.monitorCharacteristicForDevice(
+    connectedDevice.id,
+    SERVICE_UUID,
+    CHARACTERISTIC_UUID,
+    (error, characteristic) => {
+      if (error) return;
+      if (characteristic?.value) {
+        try {
+          const decodedData = Buffer.from(characteristic.value, 'base64');
+          const chunkString = decodedData.toString('utf8');
+          
+          const fullMessage = processChunk(chunkString);
+          if (fullMessage) {
+            messageListeners.forEach(l => l(fullMessage));
           }
-        }
+        } catch (e) {}
       }
-    );
-  } catch (error) {
-    console.error('[bleTransport] Failed to start monitoring:', error);
-  }
+    }
+  );
 }
 
 /**
- * Send data via BLE
+ * Send data via BLE with chunking
  */
 export async function sendBLE(data: string): Promise<boolean> {
-  if (!connectedDevice || !bleManager) {
-    console.warn('[bleTransport] Cannot send - no connected device');
-    return false;
+  const msgId = Math.random().toString(36).substring(7);
+  const chunks = chunkMessage(msgId, data);
+  console.log(`[bleTransport] Sending message ${msgId} in ${chunks.length} chunks`);
+
+  let finalSuccess = true;
+
+  for (const chunk of chunks) {
+    let chunkSuccess = false;
+    
+    // Try Central Mode
+    if (connectedDevice && bleManager) {
+      try {
+        const encoded = Buffer.from(chunk, 'utf8').toString('base64');
+        await bleManager.writeCharacteristicWithResponseForDevice(
+          connectedDevice.id,
+          SERVICE_UUID,
+          CHARACTERISTIC_UUID,
+          encoded
+        );
+        chunkSuccess = true;
+      } catch (e) {
+        console.warn('[bleTransport] Chunk send failed (Central):', e);
+      }
+    }
+
+    // Try Peripheral Mode if Central failed or isn't connected
+    if (!chunkSuccess && isServerRunning) {
+      try {
+         const bytes = Array.from(Buffer.from(chunk, 'utf8'));
+         await BLEPeripheral.sendNotificationToDevices(SERVICE_UUID, CHARACTERISTIC_UUID, bytes);
+         chunkSuccess = true;
+      } catch (e) {
+         console.warn('[bleTransport] Chunk send failed (Peripheral):', e);
+      }
+    }
+
+    if (!chunkSuccess) {
+      finalSuccess = false;
+      break;
+    }
+    
+    // Small delay between chunks to prevent flooding
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
 
-  try {
-    // Encode to base64
-    const encoded = Buffer.from(data, 'utf8').toString('base64');
-
-    console.log('[bleTransport] Sending via BLE, length:', data.length);
-
-    await bleManager.writeCharacteristicWithResponseForDevice(
-      connectedDevice.id,
-      SERVICE_UUID,
-      CHARACTERISTIC_UUID,
-      encoded
-    );
-
-    console.log('[bleTransport] Message sent successfully');
-    return true;
-  } catch (error) {
-    console.error('[bleTransport] Failed to send via BLE:', error);
-    return false;
-  }
+  return finalSuccess;
 }
 
-/**
- * Register a listener for incoming BLE messages
- */
 export function onBLEMessage(callback: (data: string) => void): void {
   messageListeners.push(callback);
-  console.log('[bleTransport] Registered BLE message listener, total:', messageListeners.length);
 }
 
-/**
- * Disconnect from BLE device
- */
 export async function disconnectBLE(): Promise<boolean> {
-  try {
-    if (monitorUnsubscribe) {
-      monitorUnsubscribe();
-      monitorUnsubscribe = null;
-    }
-
-    if (connectedDevice) {
-      await connectedDevice.cancelConnection();
-      connectedDevice = null;
-      console.log('[bleTransport] Disconnected from device');
-    }
-
-    if (bleManager) {
-      bleManager.stopDeviceScan();
-    }
-
-    return true;
-  } catch (error) {
-    console.error('[bleTransport] Failed to disconnect:', error);
-    return false;
-  }
+  if (monitorUnsubscribe) monitorUnsubscribe.remove();
+  if (connectedDevice) await connectedDevice.cancelConnection();
+  connectedDevice = null;
+  return true;
 }
 
-/**
- * Check if connected to a BLE device
- */
 export function isConnected(): boolean {
-  return connectedDevice !== null;
-}
-
-/**
- * Get connected device info
- */
-export function getConnectedDeviceId(): string | null {
-  return connectedDevice?.id || null;
+  return connectedDevice !== null || isServerRunning;
 }

@@ -11,6 +11,7 @@ export type Conversation = {
 };
 
 export async function saveMessage(packet: MeshPacket) {
+  if (packet.type === 'HANDSHAKE') return;
   const chatId = await localDatabase.getChatId(packet.from, packet.to);
   const content = packet.payload?.text ?? '';
 

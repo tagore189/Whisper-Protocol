@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { supabase } from '../storage/supabase';
+// import { supabase } from '../storage/supabase';
 
 export interface AppSettings {
   deviceId: string;
@@ -87,26 +87,14 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
       setSettings(currentSettings);
       setIsLoaded(true);
 
-      // Register or update device on Supabase
-      registerDeviceOnSupabase(currentSettings.deviceId, currentSettings.deviceName);
+      // Offline: No Supabase registration needed
+
     } catch (e) {
       console.error("Error loading app settings", e);
     }
   };
 
-  const registerDeviceOnSupabase = async (deviceId: string, deviceName: string) => {
-    try {
-      const { error } = await supabase
-        .from("users")
-        .upsert({ device_id: deviceId, device_name: deviceName }, { onConflict: "device_id" });
-      
-      if (error) {
-        console.error("Error syncing to Supabase users table:", error);
-      }
-    } catch (err) {
-      console.error("Supabase unreachable:", err);
-    }
-  };
+
 
   const updateSettings = async (newSettings: Partial<AppSettings>) => {
     try {
@@ -122,9 +110,8 @@ export function AppSettingsProvider({ children }: { children: React.ReactNode })
       setSettings(updated);
       await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(updated));
 
-      if (restSettings.deviceName && restSettings.deviceName !== settings.deviceName) {
-        registerDeviceOnSupabase(updated.deviceId, updated.deviceName);
-      }
+      // Offline: No Supabase sync needed
+
     } catch (e) {
       console.error("Error saving app settings", e);
     }

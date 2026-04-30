@@ -9,6 +9,7 @@ export interface DeviceRecord {
   id: string;
   name?: string;
   lastSeen?: number;
+  handshakeState?: string;
 }
 
 export interface ChatRecord {

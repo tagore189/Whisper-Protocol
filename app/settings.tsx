@@ -11,7 +11,8 @@ import {
 } from "react-native";
 
 import { useAppSettings } from '../src/core/AppSettingsContext';
-import { supabase } from '../src/storage/supabase';
+// import { supabase } from '../src/storage/supabase';
+import { localDatabase } from '../src/storage/localDatabase';
 
 export default function SettingsScreen() {
 
@@ -22,10 +23,10 @@ export default function SettingsScreen() {
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => {
         try {
-          await supabase.from("messages").delete().or(`sender_device_id.eq.${appSettings.deviceId},receiver_device_id.eq.${appSettings.deviceId}`);
-          Alert.alert("Success", "Chat history cleared.");
+          await localDatabase.clearAll();
+          Alert.alert("Success", "Local chat history cleared.");
         } catch (e) {
-          Alert.alert("Error", "Failed to clear chat history.");
+          Alert.alert("Error", "Failed to clear local chat history.");
         }
       }},
     ]);
