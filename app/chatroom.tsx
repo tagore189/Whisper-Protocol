@@ -48,7 +48,7 @@ function toMeshPacket(message: Message): MeshPacket<{ text: string }> {
     to: message.receiver_device_id,
     ttl: 4,
     timestamp: new Date(message.created_at).getTime(),
-    type: "TEXT",
+    type: "message",
     payload: { text: message.content },
   };
 }
@@ -162,7 +162,7 @@ export default function ChatRoomScreen() {
       to: peerId,
       ttl: 4,
       timestamp,
-      type: "TEXT",
+      type: "message",
       payload: { text },
     };
 

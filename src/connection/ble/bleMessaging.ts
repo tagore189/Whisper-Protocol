@@ -158,6 +158,12 @@ export function initializeBLEMessaging(): void {
  */
 async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
   try {
+    // Handle Control messages
+    if (['HANDSHAKE', 'connection_request', 'connection_accepted', 'connection_rejected'].includes(packet.type)) {
+      emitMessage(packet);
+      return;
+    }
+
     // Handle ACK messages
     if (packet.type === 'ACK') {
       const msgId = packet.payload?.messageId;

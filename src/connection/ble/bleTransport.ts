@@ -185,7 +185,7 @@ export async function startGattServer(advertisedName?: string): Promise<boolean>
     await BLEPeripheral.clean();
     await BLEPeripheral.setName(nameToUse);
     await BLEPeripheral.addService(SERVICE_UUID, true);
-    await BLEPeripheral.addCharacteristicToService(SERVICE_UUID, CHARACTERISTIC_UUID, 17, 26);
+    await BLEPeripheral.addCharacteristicToService(SERVICE_UUID, CHARACTERISTIC_UUID, 17, 30);
     await BLEPeripheral.start();
 
     isServerRunning = true;

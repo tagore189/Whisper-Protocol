@@ -13,6 +13,7 @@ import { onMessageReceived, sendMessageBLE } from "./ble/bleMessaging";
 import { connectDirectly, connectToDeviceById, connectViaQRPayload, isConnected as isBLEConnected, onConnectionStateChange } from "./ble/bleTransport";
 import type { MeshPacket } from "./mesh/packet";
 import { localDatabase } from "../storage/localDatabase";
+import { ConnectionRequestModal, ConnectionRequestData } from '../components/ConnectionRequestModal';
 
 export type HandshakeState =
   | "IDLE"
@@ -56,6 +57,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastSeenRef = useRef<Map<string, number>>(new Map());
   const [globalBleState, setGlobalBleState] = useState<string>('disconnected');
+  const [incomingRequest, setIncomingRequest] = useState<{ packet: MeshPacket; data: ConnectionRequestData } | null>(null);
 
   useEffect(() => {
     devicesByIdRef.current = devicesById;
@@ -152,15 +154,35 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
 
   const processPacket = useCallback(async (packet: MeshPacket) => {
     console.log('[handshake] Processing packet:', packet.id, packet.type, packet.payload);
-    if (packet.type !== 'HANDSHAKE') return;
-    if (!settings.deviceId || packet.to !== settings.deviceId) {
-      console.log('[handshake] Ignoring packet - not for us or not handshake');
+    const peerId = packet.from;
+    const status = packet.payload?.status;
+    const peerName = packet.payload?.name || packet.payload?.fromDeviceName || peerId.slice(-8);
+
+    if (packet.type === 'connection_request') {
+      console.log(`[handshake] Incoming connection request from ${peerId}`);
+      setIncomingRequest({
+        packet,
+        data: {
+          fromDeviceId: peerId,
+          fromDeviceName: peerName,
+        }
+      });
       return;
     }
 
-    const peerId = packet.from;
-    const status = packet.payload?.status;
-    const peerName = packet.payload?.name || peerId.slice(-8);
+    if (packet.type === 'connection_accepted') {
+      console.log(`[handshake] Connection accepted by ${peerId}`);
+      setPeerState(peerId, peerName, 'CONNECTED');
+      return;
+    }
+
+    if (packet.type === 'connection_rejected') {
+      console.log(`[handshake] Connection rejected by ${peerId}`);
+      setPeerState(peerId, peerName, 'FAILED', { lastError: 'Connection rejected' });
+      return;
+    }
+
+    if (packet.type !== 'HANDSHAKE') return;
 
     console.log(`[handshake] Received ${status} from ${peerId}`);
     lastSeenRef.current.set(peerId, Date.now());
@@ -252,31 +274,75 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   );
 
   const connectDirectlySkipHandshake = useCallback(
-    async (device: { id: string; name: string; advertisedName: string; serviceUUID: string; sessionToken: string; timestamp: number }) => {
-      if (!settings.deviceId) throw new Error('Identity unavailable');
+    (device: { id: string; name: string; advertisedName: string; serviceUUID: string; sessionToken: string; timestamp: number }) => {
+      return new Promise<void>(async (resolve, reject) => {
+        if (!settings.deviceId) return reject(new Error('Identity unavailable'));
 
-      console.log('[qr-connect] Starting QR→BLE connect to peer:', device.id, 'advertisedName:', device.advertisedName);
-      clearPeerTimer(device.id);
+        console.log('[qr-connect] Starting QR→BLE connect to peer:', device.id, 'advertisedName:', device.advertisedName);
+        clearPeerTimer(device.id);
 
-      try {
-        await connectViaQRPayload({
-          deviceId: device.id,
-          deviceName: device.name,
-          advertisedName: device.advertisedName,
-          serviceUUID: device.serviceUUID,
-          sessionToken: device.sessionToken,
-          timestamp: device.timestamp,
-        });
+        try {
+          await connectViaQRPayload({
+            deviceId: device.id,
+            deviceName: device.name,
+            advertisedName: device.advertisedName,
+            serviceUUID: device.serviceUUID,
+            sessionToken: device.sessionToken,
+            timestamp: device.timestamp,
+          });
 
-        setPeerState(device.id, device.name, 'CONNECTED');
-        console.log('[qr-connect] Connected to peer:', device.id);
-      } catch (error) {
-        console.error('[qr-connect] QR connection failed:', error);
-        setPeerState(device.id, device.name, 'FAILED', { lastError: 'QR connection failed' });
-        throw error;
-      }
+          setPeerState(device.id, device.name, 'HELLO');
+          console.log('[qr-connect] Connected physically to peer:', device.id, 'sending connection request');
+
+          const packet: MeshPacket = {
+            id: Crypto.randomUUID(),
+            from: settings.deviceId,
+            to: device.id,
+            ttl: 4,
+            timestamp: Date.now(),
+            type: 'connection_request',
+            payload: {
+              fromDeviceId: settings.deviceId,
+              fromDeviceName: settings.deviceName || 'Unknown',
+              timestamp: Date.now(),
+            },
+          };
+          await sendMessageBLE(packet);
+
+          let resolved = false;
+
+          const checkInterval = setInterval(() => {
+            if (resolved) return;
+            const current = devicesByIdRef.current[device.id];
+            if (current) {
+              if (current.handshakeState === 'CONNECTED') {
+                clearInterval(checkInterval);
+                resolved = true;
+                resolve();
+              } else if (current.handshakeState === 'FAILED') {
+                clearInterval(checkInterval);
+                resolved = true;
+                reject(new Error(current.lastError || 'Connection rejected or failed'));
+              }
+            }
+          }, 500);
+
+          setTimeout(() => {
+            if (resolved) return;
+            clearInterval(checkInterval);
+            resolved = true;
+            setPeerState(device.id, device.name, 'FAILED', { lastError: 'Connection request timed out' });
+            reject(new Error('Connection request timed out'));
+          }, 30000);
+
+        } catch (error) {
+          console.error('[qr-connect] QR connection failed:', error);
+          setPeerState(device.id, device.name, 'FAILED', { lastError: 'QR connection failed' });
+          reject(error);
+        }
+      });
     },
-    [settings.deviceId, clearPeerTimer, setPeerState]
+    [settings.deviceId, settings.deviceName, clearPeerTimer, setPeerState]
   );
 
   const acceptHandshake = useCallback(
@@ -332,6 +398,48 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
     [getConnectionState]
   );
 
+  const handleAcceptRequest = async () => {
+    if (!incomingRequest) return;
+    const { packet } = incomingRequest;
+    
+    setPeerState(packet.from, packet.payload?.fromDeviceName || packet.from.slice(-8), 'CONNECTED');
+    
+    const acceptPacket: MeshPacket = {
+      id: Crypto.randomUUID(),
+      from: settings.deviceId!,
+      to: packet.from,
+      ttl: 4,
+      timestamp: Date.now(),
+      type: 'connection_accepted',
+      payload: {
+        fromDeviceId: settings.deviceId,
+        timestamp: Date.now(),
+      },
+    };
+    await sendMessageBLE(acceptPacket);
+    setIncomingRequest(null);
+  };
+
+  const handleRejectRequest = async () => {
+    if (!incomingRequest) return;
+    const { packet } = incomingRequest;
+    
+    const rejectPacket: MeshPacket = {
+      id: Crypto.randomUUID(),
+      from: settings.deviceId!,
+      to: packet.from,
+      ttl: 4,
+      timestamp: Date.now(),
+      type: 'connection_rejected',
+      payload: {
+        fromDeviceId: settings.deviceId,
+        timestamp: Date.now(),
+      },
+    };
+    await sendMessageBLE(rejectPacket);
+    setIncomingRequest(null);
+  };
+
   return (
     <BleConnectionContext.Provider
       value={{
@@ -348,6 +456,11 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
       }}
     >
       {children}
+      <ConnectionRequestModal 
+        request={incomingRequest ? incomingRequest.data : null}
+        onAccept={handleAcceptRequest}
+        onReject={handleRejectRequest}
+      />
     </BleConnectionContext.Provider>
   );
 }

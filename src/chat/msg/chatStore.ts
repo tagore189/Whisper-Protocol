@@ -49,7 +49,7 @@ export async function loadMessages(): Promise<MeshPacket[]> {
     to: message.receiver,
     ttl: 4,
     timestamp: message.timestamp,
-    type: (message.type as PacketType | undefined) ?? 'TEXT',
+    type: (message.type as PacketType | undefined) ?? 'message',
     payload: message.payload,
   }));
 }
@@ -106,7 +106,7 @@ export async function getMessagesWithPeer(
       to: message.receiver,
       ttl: 4,
       timestamp: message.timestamp,
-      type: (message.type as PacketType | undefined) ?? 'TEXT',
+      type: (message.type as PacketType | undefined) ?? 'message',
       payload: message.payload,
     }));
 }
