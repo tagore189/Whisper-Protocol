@@ -149,7 +149,7 @@ export default function QrDiscoveryScreen() {
     setIsHandlingScan(true);
 
     try {
-      await connectDirectlySkipHandshake({
+      const peer = await connectDirectlySkipHandshake({
         id: validation.payload.deviceId,
         name: validation.payload.deviceName,
         advertisedName: validation.payload.advertisedName,
@@ -159,7 +159,7 @@ export default function QrDiscoveryScreen() {
       });
 
       router.push(
-        (`/chatroom?peerId=${encodeURIComponent(validation.payload.deviceId)}&peerName=${encodeURIComponent(validation.payload.deviceName)}` as Href),
+        (`/chatroom?peerId=${encodeURIComponent(peer.peerId)}&peerName=${encodeURIComponent(peer.peerName)}` as Href),
       );
     } catch (error: any) {
       const msg =
