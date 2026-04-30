@@ -83,9 +83,9 @@ export default function DeviceDiscoveryScreen() {
 
   const sendConnectionRequest = async (device: { id: string; name: string }) => {
     try {
-      await requestConnectionFromScan(device);
+      const peer = await requestConnectionFromScan(device);
       Alert.alert("Connected", "Connection accepted. You can now chat.");
-      router.push(`/chatroom?peerId=${encodeURIComponent(device.id)}&peerName=${encodeURIComponent(device.name)}` as any);
+      router.push(`/chatroom?peerId=${encodeURIComponent(peer.peerId)}&peerName=${encodeURIComponent(peer.peerName)}` as any);
     } catch (e: any) {
       Alert.alert("Connection Failed", e?.message || "Could not connect to device.");
     }

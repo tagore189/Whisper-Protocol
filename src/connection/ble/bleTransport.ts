@@ -97,13 +97,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: string): 
 const handlePeripheralWrite = (params: any) => {
   if (params.data) {
     try {
-      const bytes = Uint8Array.from(params.data);
-      const chunkString = Buffer.from(bytes).toString('utf8');
+      let chunkString = '';
+      if (typeof params.data === 'string') {
+        // Some BLE libraries emit hex or base64 strings
+        const isHex = /^[0-9A-Fa-f]+$/.test(params.data);
+        if (isHex && params.data.length % 2 === 0) {
+          chunkString = Buffer.from(params.data, 'hex').toString('utf8');
+        } else {
+          chunkString = Buffer.from(params.data, 'base64').toString('utf8');
+          // Fallback if not valid base64 but rather raw string (rare)
+          if (!chunkString || chunkString.includes('\ufffd')) {
+            chunkString = params.data;
+          }
+        }
+      } else {
+        const bytes = Uint8Array.from(params.data);
+        chunkString = Buffer.from(bytes).toString('utf8');
+      }
       
       // Process chunk
       const fullMessage = processChunk(chunkString);
       if (fullMessage) {
-        console.log('[bleTransport] Full message reassembled from chunks');
+        console.log('[bleTransport] Full message reassembled from chunks (Peripheral mode)');
         messageListeners.forEach(l => {
           try { l(fullMessage); } catch (e) { console.error(e); }
         });
@@ -116,6 +131,7 @@ const handlePeripheralWrite = (params: any) => {
 
 // Register listener using DeviceEventEmitter
 DeviceEventEmitter.addListener('onCharacteristicWrite', handlePeripheralWrite);
+DeviceEventEmitter.addListener('onWrite', handlePeripheralWrite);
 
 /**
  * Request BLE permissions on Android

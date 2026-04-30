@@ -2,7 +2,6 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useRef } from "react";
 import { View, ActivityIndicator } from "react-native";
-import { ConnectionRequestListener } from "../components/ConnectionRequestListener";
 import { startScanAndConnect, startGattServer } from '../src/connection/ble/bleTransport';
 import { BleConnectionProvider } from '../src/connection/BleConnectionContext';
 import { AppSettingsProvider, useAppSettings } from '../src/core/AppSettingsContext';
@@ -55,7 +54,6 @@ function RootContent() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="chatroom" />
       </Stack>
-      <ConnectionRequestListener />
     </BleConnectionProvider>
   );
 }
