@@ -21,10 +21,9 @@ import {
   getQrDiscoverySignature,
   parseQrDiscoveryPayload,
   QR_DISCOVERY_EXPIRATION_MS,
-  type QrDiscoveryPayload,
   validateQrDiscoveryPayload,
 } from "../src/core/qrDiscovery";
-import { bleDeviceMap, connectedDevice } from "../src/connection/ble/bleTransport";
+import { SERVICE_UUID } from "../src/connection/ble/bleTransport";
 
 type ScreenMode = "show" | "scan";
 
@@ -43,15 +42,10 @@ export default function QrDiscoveryScreen() {
   const { connectDirectlySkipHandshake } = useBleConnections();
   const [permission, requestPermission] = useCameraPermissions();
   const [isHandlingScan, setIsHandlingScan] = useState(false);
-  const getCurrentBleId = useCallback(() => {
-    if (connectedDevice) return connectedDevice.id;
-    // Last known device from bleDeviceMap, maybe for this device or just any known
-    const lastKnown = bleDeviceMap[settings.deviceName] || Object.values(bleDeviceMap)[0];
-    return lastKnown || "unknown_ble_id";
-  }, [settings.deviceName]);
 
+  // QR payload uses the stable SERVICE_UUID so the scanner can find us via BLE scan
   const [qrPayload, setQrPayload] = useState(() =>
-    createQrDiscoveryPayload(settings.deviceId, settings.deviceName, connectedDevice?.id || "unknown")
+    createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID)
   );
   const [refreshTick, setRefreshTick] = useState(Date.now());
   const lastScanRef = useRef<{ signature: string; scannedAt: number } | null>(null);
@@ -59,11 +53,9 @@ export default function QrDiscoveryScreen() {
   const resetScanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!settings.deviceId) {
-      return;
-    }
-    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, getCurrentBleId()));
-  }, [settings.deviceId, settings.deviceName, getCurrentBleId]);
+    if (!settings.deviceId) return;
+    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID));
+  }, [settings.deviceId, settings.deviceName]);
 
   useEffect(() => {
     if (screenMode !== "show") {
@@ -79,9 +71,9 @@ export default function QrDiscoveryScreen() {
 
   useEffect(() => {
     if (screenMode === "show" && refreshTick - qrPayload.timestamp >= QR_DISCOVERY_EXPIRATION_MS) {
-      setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, getCurrentBleId()));
+      setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID));
     }
-  }, [qrPayload.timestamp, refreshTick, screenMode, settings.deviceId, settings.deviceName, getCurrentBleId]);
+  }, [qrPayload.timestamp, refreshTick, screenMode, settings.deviceId, settings.deviceName]);
 
   useEffect(
     () => () => {
@@ -94,7 +86,7 @@ export default function QrDiscoveryScreen() {
   );
 
   const regenerateQrCode = () => {
-    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, getCurrentBleId()));
+    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID));
     setRefreshTick(Date.now());
   };
 
@@ -144,14 +136,21 @@ export default function QrDiscoveryScreen() {
       await connectDirectlySkipHandshake({
         id: validation.payload.deviceId,
         name: validation.payload.deviceName,
-        bleId: validation.payload.bleId,
+        serviceUUID: validation.payload.serviceUUID,
+        sessionToken: validation.payload.sessionToken,
+        timestamp: validation.payload.timestamp,
       });
-      // Immediately navigate to chat instead of waiting for handshake completion
+
+      // Navigate to chatroom after successful connection
       router.push(
         (`/chatroom?peerId=${encodeURIComponent(validation.payload.deviceId)}&peerName=${encodeURIComponent(validation.payload.deviceName)}` as Href),
       );
     } catch (error: any) {
-      Alert.alert("Scan failed", error?.message || "Could not create a connection request from this QR code.");
+      const msg =
+        error?.message?.includes('not found') || error?.message?.includes('timeout')
+          ? 'Device not found. Make sure the other phone is showing QR and Bluetooth is on.'
+          : error?.message || 'Could not connect to the device. Please try again.';
+      Alert.alert('Connection failed', msg);
       releaseScanLock(400);
     }
   }, [connectDirectlySkipHandshake, isHandlingScan, releaseScanLock, router, settings.deviceId]);

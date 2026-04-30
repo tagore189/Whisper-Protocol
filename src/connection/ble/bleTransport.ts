@@ -77,6 +77,19 @@ function getBleManager(): BleManager {
   return bleManager;
 }
 
+/**
+ * Race a promise against a timeout.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, errorMessage: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(errorMessage)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
 // Global handler for incoming peripheral data (when other devices write to us)
 const handlePeripheralWrite = (params: any) => {
   if (params.data) {
@@ -203,76 +216,23 @@ export async function connectDirectly(deviceId: string): Promise<boolean> {
   return connectToDeviceById(deviceId);
 }
 
-/**
- * Helper to scan for a peripheral with the service UUID and return its BLE ID
- */
-async function scanForPeripheral(timeoutMs = 10000): Promise<string> {
-  const manager = getBleManager();
-  // Ensure we have scan permissions on Android
-  if (Platform.OS === 'android') {
-    const granted = await requestBlePermissions();
-    if (!granted) throw new Error('BLE scan permission denied');
-  }
 
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      manager.stopDeviceScan();
-      reject(new Error('Scan timeout: Could not find peripheral'));
-    }, timeoutMs);
-
-    manager.startDeviceScan([SERVICE_UUID], null, (error, device) => {
-      if (error) {
-        clearTimeout(timeout);
-        manager.stopDeviceScan();
-        reject(error);
-        return;
-      }
-      if (device && device.id) {
-        console.log('[BLE] Found peripheral during QR scan:', device.name, device.id);
-        clearTimeout(timeout);
-        manager.stopDeviceScan();
-        resolve(device.id);
-      }
-    });
-  });
-}
 
 /**
- * Connect using explicit bleId with automatic retries for QR scanning reliability
+ * Connect to a device by its BLE hardware ID with automatic retries.
  */
 export async function connectToDeviceById(bleId: string, retryCount = 0): Promise<boolean> {
   try {
     const manager = getBleManager();
-    let targetBleId = bleId;
 
-    // If we need to scan for an unknown peripheral we must have Android scan permissions first
-    if (!targetBleId || targetBleId.includes("unknown") || targetBleId.length < 5) {
-           reject(new Error("Scan timeout: Could not find peripheral"));
-         }, 10000);
-
-         manager.startDeviceScan([SERVICE_UUID], null, (error, device) => {
-           if (error) {
-             clearTimeout(timeout);
-             manager.stopDeviceScan();
-             reject(error);
-             return;
-           }
-           if (device) {
-             console.log('[BLE] Found peripheral during QR scan:', device.name, device.id);
-             clearTimeout(timeout);
-             manager.stopDeviceScan();
-             resolve(device.id);
-           }
-         });
-       });
-    }
-
-    console.log(`[BLE] Direct connecting to: ${targetBleId} (Attempt: ${retryCount + 1})`);
+    console.log(`[BLE] Connecting to: ${bleId} (attempt ${retryCount + 1})`);
     emitConnectionState('connecting');
 
-    const device = await manager.connectToDevice(targetBleId, {
-      autoConnect: true,
-    });
+    const device = await withTimeout(
+      manager.connectToDevice(bleId, { autoConnect: false }),
+      10000,
+      'Connection timed out'
+    );
 
     if (Platform.OS === 'android') {
       try {
@@ -283,50 +243,141 @@ export async function connectToDeviceById(bleId: string, retryCount = 0): Promis
       }
     }
 
-    const connected = await device.discoverAllServicesAndCharacteristics();
+    const connected = await withTimeout(
+      device.discoverAllServicesAndCharacteristics(),
+      8000,
+      'Service discovery timed out'
+    );
     connectedDevice = connected;
-    reconnectAttempts = 0; // Reset on success
+    reconnectAttempts = 0;
 
-    console.log("[BLE] Connected via QR");
+    console.log('[BLE] Connected to:', bleId);
     emitConnectionState('connected');
-    
-    // Auto-resend any pending messages
     resendPendingMessages();
 
     if (disconnectSubscription) {
       disconnectSubscription.remove();
     }
-    disconnectSubscription = manager.onDeviceDisconnected(targetBleId, (err) => handleDisconnect(err, targetBleId));
+    disconnectSubscription = manager.onDeviceDisconnected(bleId, (err) => handleDisconnect(err, bleId));
     startMonitoring();
 
     return true;
   } catch (e) {
-    // If we failed after retries, report to UI and reset handling flag
-    if (retryCount < 2) { // 3 total attempts
-      console.warn(`[BLE] Connection attempt ${retryCount + 1} failed. Retrying...`);
+    if (retryCount < 2) {
+      console.warn(`[BLE] Connection attempt ${retryCount + 1} failed, retrying...`, e);
       return new Promise((resolve) => {
         setTimeout(() => resolve(connectToDeviceById(bleId, retryCount + 1)), 2000);
       });
     }
-    // All retries exhausted – surface a clear error to the user
-    console.error('[BLE] All connection attempts failed for', bleId);
-    Alert.alert('Connection failed', 'Unable to connect to the device after multiple attempts. Please ensure Bluetooth is on and the devices are within range.');
-    releaseScanLock?.(400);
+    console.error('[BLE] All connection attempts failed for', bleId, e);
     emitConnectionState('failed');
-    return false;
-    }
-    console.error("[BLE] Direct connect failed after 3 attempts:", e);
-    emitConnectionState('disconnected');
-    startScanAndConnect();
     return false;
   }
 }
 
 /**
- * QR-based connection alias
+ * Connect via a QR payload by scanning for any peripheral advertising SERVICE_UUID.
+ * Does not require a pre-known BLE hardware ID.
+ *
+ * @param payload - The validated QrDiscoveryPayload from the scanned QR code.
+ * @returns true if connected successfully, throws on failure.
  */
-export async function connectViaQR(scannedData: { deviceId: string; serviceUUID?: string; bleId: string }) {
-  return connectToDeviceById(scannedData.bleId);
+export async function connectViaQRPayload(payload: {
+  deviceId: string;
+  deviceName: string;
+  serviceUUID: string;
+  sessionToken: string;
+  timestamp: number;
+}): Promise<boolean> {
+  const manager = getBleManager();
+
+  // 1. Ensure BLE permissions
+  const hasPermissions = await requestBlePermissions();
+  if (!hasPermissions) {
+    throw new Error('Bluetooth permissions are required. Please grant them in Settings.');
+  }
+
+  // 2. Wait for BLE to be powered on (up to 5 s)
+  await withTimeout(
+    new Promise<void>((resolve) => {
+      const sub = manager.onStateChange((state) => {
+        if (state === 'PoweredOn') {
+          sub.remove();
+          resolve();
+        }
+      }, true);
+    }),
+    5000,
+    'Bluetooth is not powered on. Please enable Bluetooth and try again.'
+  );
+
+  // 3. Stop any existing scan
+  try { manager.stopDeviceScan(); } catch (_) {}
+
+  emitConnectionState('connecting');
+
+  // 4. Scan for the peripheral advertising SERVICE_UUID (8 s timeout)
+  const targetBleId = await withTimeout(
+    new Promise<string>((resolve, reject) => {
+      manager.startDeviceScan([SERVICE_UUID], { allowDuplicates: false }, (error, device) => {
+        if (error) {
+          manager.stopDeviceScan();
+          reject(error);
+          return;
+        }
+        if (device && device.id) {
+          console.log('[BLE] QR-scan found peripheral:', device.name, device.id);
+          manager.stopDeviceScan();
+          resolve(device.id);
+        }
+      });
+    }),
+    8000,
+    'Device not found. Make sure the other phone is showing QR and Bluetooth is on.'
+  );
+
+  // 5. Connect to the found peripheral
+  const device = await withTimeout(
+    manager.connectToDevice(targetBleId, { autoConnect: false }),
+    10000,
+    'Connection timed out'
+  );
+
+  // 6. Request MTU 512 on Android
+  if (Platform.OS === 'android') {
+    try {
+      await device.requestMTU(512);
+      console.log('[bleTransport] MTU 512 requested');
+    } catch (e) {
+      console.warn('[bleTransport] MTU request failed:', e);
+    }
+  }
+
+  // 7. Discover services and characteristics
+  const connected = await withTimeout(
+    device.discoverAllServicesAndCharacteristics(),
+    8000,
+    'Service discovery timed out'
+  );
+
+  connectedDevice = connected;
+  reconnectAttempts = 0;
+
+  // 8. Set up disconnect handler
+  if (disconnectSubscription) {
+    disconnectSubscription.remove();
+  }
+  disconnectSubscription = manager.onDeviceDisconnected(targetBleId, (err) => handleDisconnect(err, targetBleId));
+
+  // 9. Start monitoring incoming messages
+  startMonitoring();
+
+  // 10. Emit connected state
+  emitConnectionState('connected');
+  resendPendingMessages();
+
+  console.log('[BLE] connectViaQRPayload: connected to', targetBleId);
+  return true;
 }
 
 /**

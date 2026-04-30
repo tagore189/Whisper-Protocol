@@ -10,7 +10,7 @@ import React, {
 import * as Crypto from "expo-crypto";
 import { useAppSettings } from "../core/AppSettingsContext";
 import { onMessageReceived, sendMessageBLE } from "./ble/bleMessaging";
-import { connectDirectly, connectToDeviceById, isConnected as isBLEConnected, onConnectionStateChange } from "./ble/bleTransport";
+import { connectDirectly, connectToDeviceById, connectViaQRPayload, isConnected as isBLEConnected, onConnectionStateChange } from "./ble/bleTransport";
 import type { MeshPacket } from "./mesh/packet";
 import { localDatabase } from "../storage/localDatabase";
 
@@ -34,7 +34,7 @@ type BleConnectionContextValue = {
   connectedDevices: ConnectedDevice[];
   handshakeDevices: ConnectedDevice[];
   beginHandshake: (device: { id: string; name: string }) => Promise<void>;
-  connectDirectlySkipHandshake: (device: { id: string; name: string; bleId: string }) => Promise<void>;
+  connectDirectlySkipHandshake: (device: { id: string; name: string; serviceUUID: string; sessionToken: string; timestamp: number }) => Promise<void>;
   acceptHandshake: (requestId: string, peer: { id: string; name: string }) => Promise<void>;
   removeConnected: (deviceId: string) => void;
   isConnected: (deviceId: string) => boolean;
@@ -252,25 +252,28 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   );
 
   const connectDirectlySkipHandshake = useCallback(
-    async (device: { id: string; name: string; bleId: string }) => {
+    async (device: { id: string; name: string; serviceUUID: string; sessionToken: string; timestamp: number }) => {
       if (!settings.deviceId) throw new Error('Identity unavailable');
 
-      console.log('[qr-connect] Connecting directly and skipping handshake to:', device.id, 'using bleId:', device.bleId);
+      console.log('[qr-connect] Starting QR→BLE connect to peer:', device.id, 'serviceUUID:', device.serviceUUID);
       clearPeerTimer(device.id);
 
-      // Establish BLE connection directly
       try {
-        const connected = await connectToDeviceById(device.bleId);
-        if (!connected) {
-          throw new Error('Unable to connect to device');
-        }
+        // Scan for any peripheral advertising SERVICE_UUID, then connect
+        await connectViaQRPayload({
+          deviceId: device.id,
+          deviceName: device.name,
+          serviceUUID: device.serviceUUID,
+          sessionToken: device.sessionToken,
+          timestamp: device.timestamp,
+        });
 
-        // Skip handshake - set state directly to CONNECTED
+        // Skip handshake – set peer state directly to CONNECTED
         setPeerState(device.id, device.name, 'CONNECTED');
-        console.log('[qr-connect] Connected directly to:', device.id);
+        console.log('[qr-connect] Connected to peer:', device.id);
       } catch (error) {
-        console.error('[qr-connect] Direct connection failed:', error);
-        setPeerState(device.id, device.name, 'FAILED', { lastError: 'Direct connection failed' });
+        console.error('[qr-connect] QR connection failed:', error);
+        setPeerState(device.id, device.name, 'FAILED', { lastError: 'QR connection failed' });
         throw error;
       }
     },
@@ -357,7 +360,7 @@ export function useBleConnections(): BleConnectionContextValue {
       connectedDevices: [],
       handshakeDevices: [],
       beginHandshake: async () => {},
-      connectDirectlySkipHandshake: async () => {},
+      connectDirectlySkipHandshake: async (_device) => {},
       acceptHandshake: async () => {},
       removeConnected: () => {},
       isConnected: () => false,
