@@ -21,6 +21,7 @@ export type HandshakeState =
   | "ACK"
   | "READY"
   | "CONNECTED"
+  | "FULLY_CONNECTED"
   | "FAILED";
 
 export type ConnectedDevice = {
@@ -153,6 +154,12 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
       return;
     }
 
+    if (packet.type === 'connection_ready') {
+      console.log(`[handshake] Connection fully ready for ${peerId}`);
+      setPeerState(peerId, peerName, 'FULLY_CONNECTED');
+      return;
+    }
+
     if (packet.type !== 'HANDSHAKE') return;
   }, [settings.deviceId, setPeerState]);
 
@@ -231,7 +238,23 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
               clearTimeout(timeoutId);
               const peerId = response.from;
               const peerName = response.payload?.fromDeviceName || peerId.slice(-8);
-              setPeerState(peerId, peerName, 'CONNECTED');
+
+              // Send connection_ready to tell peer we are fully connected
+              const readyPacket: MeshPacket = {
+                id: Crypto.randomUUID(),
+                from: settings.deviceId!,
+                to: peerId,
+                ttl: 4,
+                timestamp: Date.now(),
+                type: 'connection_ready',
+                payload: {
+                  fromDeviceId: settings.deviceId,
+                  fromDeviceName: settings.deviceName || 'Unknown',
+                },
+              };
+              sendMessageBLE(readyPacket).catch(() => {});
+
+              setPeerState(peerId, peerName, 'FULLY_CONNECTED');
               resolve({ peerId, peerName });
             } else if (response.type === 'connection_rejected' && response.payload?.requestId === requestId) {
               resolved = true;
@@ -305,7 +328,23 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
               clearTimeout(timeoutId);
               const peerId = response.from;
               const peerName = response.payload?.fromDeviceName || peerId.slice(-8);
-              setPeerState(peerId, peerName, 'CONNECTED');
+
+              // Send connection_ready to tell peer we are fully connected
+              const readyPacket: MeshPacket = {
+                id: Crypto.randomUUID(),
+                from: settings.deviceId!,
+                to: peerId,
+                ttl: 4,
+                timestamp: Date.now(),
+                type: 'connection_ready',
+                payload: {
+                  fromDeviceId: settings.deviceId,
+                  fromDeviceName: settings.deviceName || 'Unknown',
+                },
+              };
+              sendMessageBLE(readyPacket).catch(() => {});
+
+              setPeerState(peerId, peerName, 'FULLY_CONNECTED');
               resolve({ peerId, peerName });
             } else if (response.type === 'connection_rejected' && response.payload?.requestId === requestId) {
               resolved = true;

@@ -134,7 +134,7 @@ export async function sendMessageReliable(packet: MeshPacket, initialRetries = 0
  * Control packets bypass reliable queue. Normal messages use reliable messaging.
  */
 export async function sendMessageBLE(packet: MeshPacket): Promise<void> {
-  const controlTypes = ['ACK', 'connection_request', 'connection_accepted', 'connection_rejected', 'HANDSHAKE'];
+  const controlTypes = ['ACK', 'connection_request', 'connection_accepted', 'connection_rejected', 'connection_ready', 'HANDSHAKE'];
   if (controlTypes.includes(packet.type)) {
     console.log(`[bleMessaging] Sending control packet directly: ${packet.type} (${packet.id})`);
     await sendBLE(JSON.stringify(packet));
@@ -169,7 +169,7 @@ export function initializeBLEMessaging(): void {
  */
 async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
   try {
-    const controlTypes = ['HANDSHAKE', 'connection_request', 'connection_accepted', 'connection_rejected'];
+    const controlTypes = ['HANDSHAKE', 'connection_request', 'connection_accepted', 'connection_rejected', 'connection_ready'];
 
     // Global Deduplication check for ALL packets
     if (receivedMessageIds.has(packet.id)) {

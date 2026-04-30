@@ -67,7 +67,7 @@ export default function ChatRoomScreen() {
     peerId: string;
     peerName: string;
   }>();
-  const { isConnected, globalBleState } = useBleConnections();
+  const { isConnected, getConnectionState, globalBleState } = useBleConnections();
   const { settings } = useAppSettings();
   const myId = settings.deviceId;
 
@@ -77,6 +77,8 @@ export default function ChatRoomScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   const connectedBLE = peerId ? isConnected(peerId) : false;
+  const peerState = peerId ? getConnectionState(peerId) : "IDLE";
+  const isPeerReady = peerState === "FULLY_CONNECTED";
   const displayName = peerName || (peerId ? peerId.slice(-8) : "Unknown");
 
   const refreshMessages = useCallback(async () => {
@@ -150,7 +152,7 @@ export default function ChatRoomScreen() {
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || !myId || !peerId || !chatId) return;
+    if (!text || !myId || !peerId || !chatId || !connectedBLE || !isPeerReady) return;
 
     const messageId = Crypto.randomUUID();
     const timestamp = Date.now();
@@ -224,8 +226,8 @@ export default function ChatRoomScreen() {
 
   const isReconnecting = globalBleState === 'reconnecting';
   const isFailed = globalBleState === 'failed';
-  const headerStatus = isFailed ? 'Connection Failed' : (isReconnecting ? 'Reconnecting' : (connectedBLE ? 'Connected' : 'Connecting'));
-  const headerColor = isFailed ? '#ef4444' : (isReconnecting ? '#eab308' : (connectedBLE ? '#22c55e' : '#ef4444'));
+  const headerStatus = isFailed ? 'Connection Failed' : (isReconnecting ? 'Reconnecting' : (isPeerReady ? 'Connected' : 'Connecting...'));
+  const headerColor = isFailed ? '#ef4444' : (isReconnecting ? '#eab308' : (isPeerReady ? '#22c55e' : '#eab308'));
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>
@@ -283,28 +285,34 @@ export default function ChatRoomScreen() {
         })}
       </ScrollView>
 
-      <BlurView intensity={30} tint="dark" style={styles.footer}>
-        <TextInput
-          placeholder="Message..."
-          placeholderTextColor="#908dce"
-          style={styles.input}
-          value={input}
-          onChangeText={setInput}
-          onSubmitEditing={sendMessage}
-        />
-
-        <Pressable
-          style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
-          onPress={sendMessage}
-          disabled={!input.trim()}
-        >
-          <MaterialCommunityIcons
-            name="send"
-            size={20}
-            color={input.trim() ? "#fff" : "#6b7280"}
+      {isPeerReady ? (
+        <BlurView intensity={30} tint="dark" style={styles.footer}>
+          <TextInput
+            placeholder="Message..."
+            placeholderTextColor="#908dce"
+            style={styles.input}
+            value={input}
+            onChangeText={setInput}
+            onSubmitEditing={sendMessage}
           />
-        </Pressable>
-      </BlurView>
+
+          <Pressable
+            style={[styles.sendBtn, !input.trim() && styles.sendBtnDisabled]}
+            onPress={sendMessage}
+            disabled={!input.trim()}
+          >
+            <MaterialCommunityIcons
+              name="send"
+              size={20}
+              color={input.trim() ? "#fff" : "#6b7280"}
+            />
+          </Pressable>
+        </BlurView>
+      ) : (
+        <BlurView intensity={30} tint="dark" style={[styles.footer, { justifyContent: 'center' }]}>
+          <Text style={{ color: '#9ca3af', fontSize: 16 }}>Connecting...</Text>
+        </BlurView>
+      )}
     </KeyboardAvoidingView>
   );
 }
