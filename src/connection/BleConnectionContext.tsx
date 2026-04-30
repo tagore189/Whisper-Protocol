@@ -14,6 +14,9 @@ import { connectDirectly, connectToDeviceById, connectViaQRPayload, isConnected 
 import type { MeshPacket } from "./mesh/packet";
 import { localDatabase } from "../storage/localDatabase";
 import { ConnectionRequestModal, ConnectionRequestData } from '../components/ConnectionRequestModal';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export type ActivePeer = { peerId: string | null; peerName: string | null; };
 
 export type HandshakeState =
   | "IDLE"
@@ -42,6 +45,8 @@ type BleConnectionContextValue = {
   getConnectionState: (deviceId: string) => HandshakeState;
   canOpenChat: (deviceId: string) => boolean;
   globalBleState: string;
+  activePeer: ActivePeer;
+  setActivePeer: (peer: ActivePeer) => void;
 };
 
 const BleConnectionContext = createContext<BleConnectionContextValue | null>(null);
@@ -58,6 +63,22 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   const lastSeenRef = useRef<Map<string, number>>(new Map());
   const [globalBleState, setGlobalBleState] = useState<string>('disconnected');
   const [incomingRequest, setIncomingRequest] = useState<{ packet: MeshPacket; data: ConnectionRequestData } | null>(null);
+  const [activePeer, setActivePeerState] = useState<ActivePeer>({ peerId: null, peerName: null });
+
+  useEffect(() => {
+    AsyncStorage.getItem('activePeer').then(stored => {
+      if (stored) setActivePeerState(JSON.parse(stored));
+    }).catch(() => {});
+  }, []);
+
+  const setActivePeer = useCallback((peer: ActivePeer) => {
+    setActivePeerState(peer);
+    if (peer.peerId) {
+      AsyncStorage.setItem('activePeer', JSON.stringify(peer)).catch(() => {});
+    } else {
+      AsyncStorage.removeItem('activePeer').catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     devicesByIdRef.current = devicesById;
@@ -157,6 +178,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
     if (packet.type === 'connection_ready') {
       console.log(`[handshake] Connection fully ready for ${peerId}`);
       setPeerState(peerId, peerName, 'FULLY_CONNECTED');
+      setActivePeer({ peerId, peerName });
       return;
     }
 
@@ -255,6 +277,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
               sendMessageBLE(readyPacket).catch(() => {});
 
               setPeerState(peerId, peerName, 'FULLY_CONNECTED');
+              setActivePeer({ peerId, peerName });
               resolve({ peerId, peerName });
             } else if (response.type === 'connection_rejected' && response.payload?.requestId === requestId) {
               resolved = true;
@@ -345,6 +368,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
               sendMessageBLE(readyPacket).catch(() => {});
 
               setPeerState(peerId, peerName, 'FULLY_CONNECTED');
+              setActivePeer({ peerId, peerName });
               resolve({ peerId, peerName });
             } else if (response.type === 'connection_rejected' && response.payload?.requestId === requestId) {
               resolved = true;
@@ -397,13 +421,16 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
 
   const connectedDevices = useMemo(
     () =>
-      handshakeDevices.filter(d => d.handshakeState === "CONNECTED"),
+      handshakeDevices.filter(d => d.handshakeState === "CONNECTED" || d.handshakeState === "FULLY_CONNECTED"),
     [handshakeDevices]
   );
 
 
   const isConnected = useCallback(
-    (deviceId: string) => devicesById[deviceId]?.handshakeState === "CONNECTED",
+    (deviceId: string) => {
+      const state = devicesById[deviceId]?.handshakeState;
+      return state === "CONNECTED" || state === "FULLY_CONNECTED";
+    },
     [devicesById]
   );
 
@@ -413,7 +440,10 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   );
 
   const canOpenChat = useCallback(
-    (deviceId: string) => getConnectionState(deviceId) === "CONNECTED",
+    (deviceId: string) => {
+      const state = getConnectionState(deviceId);
+      return state === "CONNECTED" || state === "FULLY_CONNECTED";
+    },
     [getConnectionState]
   );
 
@@ -473,6 +503,8 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         getConnectionState,
         canOpenChat,
         globalBleState,
+        activePeer,
+        setActivePeer,
       }}
     >
       {children}
@@ -498,6 +530,8 @@ export function useBleConnections(): BleConnectionContextValue {
       getConnectionState: () => "IDLE",
       canOpenChat: () => false,
       globalBleState: 'disconnected',
+      activePeer: { peerId: null, peerName: null },
+      setActivePeer: () => {},
     };
   }
   return ctx;

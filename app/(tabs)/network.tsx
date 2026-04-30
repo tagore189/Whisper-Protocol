@@ -14,7 +14,7 @@ import { useAppSettings } from "../../src/core/AppSettingsContext";
 export default function NetworkScreen() {
   const router = useRouter();
   const { settings } = useAppSettings();
-  const { handshakeDevices, acceptHandshake, canOpenChat, getConnectionState } =
+  const { handshakeDevices, acceptHandshake, canOpenChat, getConnectionState, setActivePeer } =
     useBleConnections();
 
   const renderDevice = ({ item }: { item: ConnectedDevice }) => {
@@ -53,11 +53,10 @@ export default function NetworkScreen() {
         {showChat && (
           <Pressable
             style={[styles.actionBtn, { backgroundColor: "rgba(105,97,255,0.15)" }]}
-            onPress={() =>
-              router.push(
-                `/chatroom?peerId=${encodeURIComponent(peerId)}&peerName=${encodeURIComponent(peerName)}` as Href
-              )
-            }
+            onPress={() => {
+              setActivePeer({ peerId, peerName });
+              router.push('/chatroom');
+            }}
           >
             <MaterialIcons name="chat" size={18} color="#6961ff" />
           </Pressable>

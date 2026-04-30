@@ -158,9 +158,7 @@ export default function QrDiscoveryScreen() {
         timestamp: validation.payload.timestamp,
       });
 
-      router.push(
-        (`/chatroom?peerId=${encodeURIComponent(peer.peerId)}&peerName=${encodeURIComponent(peer.peerName)}` as Href),
-      );
+      router.push('/chatroom');
     } catch (error: any) {
       const msg =
         error?.message?.includes("not found") || error?.message?.includes("timeout")

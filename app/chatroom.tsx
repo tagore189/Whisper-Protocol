@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { BlurView } from "expo-blur";
 import * as Crypto from "expo-crypto";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -63,13 +63,12 @@ async function getChatId(deviceA: string, deviceB: string): Promise<string> {
 
 export default function ChatRoomScreen() {
   const router = useRouter();
-  const { peerId, peerName } = useLocalSearchParams<{
-    peerId: string;
-    peerName: string;
-  }>();
-  const { isConnected, getConnectionState, globalBleState } = useBleConnections();
+  const { isConnected, getConnectionState, globalBleState, activePeer } = useBleConnections();
   const { settings } = useAppSettings();
   const myId = settings.deviceId;
+
+  const peerId = activePeer.peerId;
+  const peerName = activePeer.peerName;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatId, setChatId] = useState<string | null>(null);

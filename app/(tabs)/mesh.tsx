@@ -30,7 +30,7 @@ function timeAgo(ts: number): string {
 export default function MeshVisualizationScreen() {
   const router = useRouter();
   const [myId, setMyId] = useState<string>('');
-  const { canOpenChat } = useBleConnections();
+  const { canOpenChat, setActivePeer } = useBleConnections();
 
   // Use the robust scanner hook
   const { devices: nodes, isScanning: scanning, error: scanError, startScan, stopScan } = useBleScan();
@@ -64,9 +64,10 @@ export default function MeshVisualizationScreen() {
         Alert.alert("Handshake required", "Complete the connection handshake before opening chat.");
         return;
       }
-      router.push((`/chatroom?peerId=${encodeURIComponent(peerId)}` as Href));
+      setActivePeer({ peerId, peerName: peerId.slice(-8) });
+      router.push('/chatroom');
     },
-    [canOpenChat, router]
+    [canOpenChat, router, setActivePeer]
   );
 
   return (
