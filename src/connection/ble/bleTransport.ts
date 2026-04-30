@@ -303,9 +303,8 @@ export async function connectToDeviceById(bleId: string, retryCount = 0): Promis
 /**
  * Connect via a QR payload.
  *
- * Scans by payload.serviceUUID first (5 s), matching device by advertisedName.
- * Falls back to an unfiltered scan (5 s) with manual UUID/name check.
- * All timeouts are tight to keep total connection time under 5-8 s.
+ * Scans by payload.serviceUUID first, matching device by advertisedName or single candidate.
+ * Falls back to an unfiltered scan with manual UUID/name check if no candidates found.
  */
 export async function connectViaQRPayload(payload: {
   deviceId: string;
@@ -344,36 +343,54 @@ export async function connectViaQRPayload(payload: {
     device.name === payload.advertisedName ||
     (device as any).localName === payload.advertisedName;
 
-  // 4a. Primary scan: filtered by serviceUUID, match by name — 5 s
+  // 4a. Primary scan: filtered by serviceUUID, collect candidates
   let targetBleId: string | null = null;
-  console.log('[BLE] QR primary scan started (serviceUUID filter, name match):', payload.advertisedName);
+  const candidates = new Map<string, Device>();
+  console.log('[BLE] QR primary scan started (serviceUUID filter):', payload.advertisedName);
 
   try {
-    targetBleId = await withTimeout(
-      new Promise<string>((resolve, reject) => {
-        manager.startDeviceScan([payload.serviceUUID], { allowDuplicates: false }, (error, device) => {
-          if (error) { manager.stopDeviceScan(); reject(error); return; }
-          if (device) {
-            console.log('[BLE] Device found (primary):', device.name, device.id);
-            if (isNameMatch(device)) {
-              console.log('[BLE] Matched device (primary):', device.name, device.id);
-              manager.stopDeviceScan();
-              resolve(device.id);
-            }
+    targetBleId = await new Promise<string>((resolve, reject) => {
+      const scanTimer = setTimeout(() => {
+        manager.stopDeviceScan();
+        if (candidates.size === 1) {
+          const [onlyId] = candidates.keys();
+          console.log('[BLE] Only one candidate found, resolving:', onlyId);
+          resolve(onlyId);
+        } else {
+          reject(new Error('__primary_timeout__'));
+        }
+      }, 2000); // 2 second collection window
+
+      manager.startDeviceScan([payload.serviceUUID], { allowDuplicates: false }, (error, device) => {
+        if (error) { 
+          manager.stopDeviceScan(); 
+          clearTimeout(scanTimer);
+          reject(error); 
+          return; 
+        }
+        if (device) {
+          console.log('[BLE] Device found (primary):', device.name, device.id);
+          candidates.set(device.id, device);
+
+          if (isNameMatch(device)) {
+            console.log('[BLE] Exact name matched (primary):', device.name, device.id);
+            manager.stopDeviceScan();
+            clearTimeout(scanTimer);
+            resolve(device.id);
           }
-        });
-      }),
-      5000,
-      '__primary_timeout__'
-    );
+        }
+      });
+    });
   } catch (e: any) {
     if (e?.message !== '__primary_timeout__') throw e;
-    console.log('[BLE] Primary scan timed out, trying fallback...');
-    try { manager.stopDeviceScan(); } catch (_) {}
+    console.log(`[BLE] Primary scan ended. Candidates found: ${candidates.size}`);
+    if (candidates.size > 1) {
+      throw new Error('Multiple devices found but none matched the exact QR name. Please try again.');
+    }
   }
 
-  // 4b. Fallback scan: no UUID filter, manual name+UUID check — 5 s
-  if (!targetBleId) {
+  // 4b. Fallback scan: no UUID filter, manual name+UUID check
+  if (!targetBleId && candidates.size === 0) {
     console.log('[BLE] QR fallback scan started (no filter)');
     try {
       targetBleId = await withTimeout(
@@ -402,6 +419,10 @@ export async function connectViaQRPayload(payload: {
     }
   }
 
+  if (!targetBleId) {
+    throw new Error('Device not found. Make sure the other phone is showing QR and Bluetooth is on.');
+  }
+
   // 5. Connect — 7 s
   console.log('[BLE] Connecting to matched device:', targetBleId);
   const device = await withTimeout(
@@ -424,6 +445,29 @@ export async function connectViaQRPayload(payload: {
     'Service discovery timed out'
   );
   console.log('[BLE] Discovery complete for:', targetBleId);
+
+  // 7.5 Verify device has correct service and characteristic
+  const services = await connected.services();
+  let validDevice = false;
+
+  for (const s of services) {
+    if (s.uuid.toLowerCase() === payload.serviceUUID.toLowerCase()) {
+      const chars = await s.characteristics();
+      for (const c of chars) {
+        if (c.uuid.toLowerCase() === CHARACTERISTIC_UUID.toLowerCase()) {
+          validDevice = true;
+          break;
+        }
+      }
+    }
+    if (validDevice) break;
+  }
+
+  if (!validDevice) {
+    console.warn('[BLE] Verification failed for device:', targetBleId);
+    await manager.cancelDeviceConnection(targetBleId).catch(() => {});
+    throw new Error('Device verification failed. Not a valid Whisper device.');
+  }
 
   connectedDevice = connected;
   reconnectAttempts = 0;
