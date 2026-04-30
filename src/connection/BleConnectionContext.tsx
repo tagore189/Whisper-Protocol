@@ -48,6 +48,7 @@ type BleConnectionContextValue = {
   activePeer: ActivePeer;
   setActivePeer: (peer: ActivePeer) => void;
   deviceNameMap: Record<string, string>;
+  bleToAppMap: Record<string, string>;
 };
 
 const BleConnectionContext = createContext<BleConnectionContextValue | null>(null);
@@ -66,6 +67,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   const [incomingRequest, setIncomingRequest] = useState<{ packet: MeshPacket; data: ConnectionRequestData } | null>(null);
   const [activePeer, setActivePeerState] = useState<ActivePeer>({ peerId: null, peerName: null });
   const [deviceNameMap, setDeviceNameMap] = useState<Record<string, string>>({});
+  const [bleToAppMap, setBleToAppMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     AsyncStorage.getItem('activePeer').then(stored => {
@@ -311,6 +313,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
               };
               sendMessageBLE(readyPacket).catch(() => {});
 
+              setBleToAppMap(prev => ({ ...prev, [device.id]: peerId }));
               setPeerState(peerId, peerName, 'FULLY_CONNECTED');
               setActivePeer({ peerId, peerName });
               resolve({ peerId, peerName });
@@ -402,6 +405,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
               };
               sendMessageBLE(readyPacket).catch(() => {});
 
+              setBleToAppMap(prev => ({ ...prev, [device.id]: peerId }));
               setPeerState(peerId, peerName, 'FULLY_CONNECTED');
               setActivePeer({ peerId, peerName });
               resolve({ peerId, peerName });
@@ -542,6 +546,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         activePeer,
         setActivePeer,
         deviceNameMap,
+        bleToAppMap,
       }}
     >
       {children}
@@ -570,6 +575,7 @@ export function useBleConnections(): BleConnectionContextValue {
       activePeer: { peerId: null, peerName: null },
       setActivePeer: () => {},
       deviceNameMap: {},
+      bleToAppMap: {},
     };
   }
   return ctx;

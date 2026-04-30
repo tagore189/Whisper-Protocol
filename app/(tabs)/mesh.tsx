@@ -31,7 +31,7 @@ function timeAgo(ts: number): string {
 export default function MeshVisualizationScreen() {
   const router = useRouter();
   const [myId, setMyId] = useState<string>('');
-  const { canOpenChat, setActivePeer, deviceNameMap } = useBleConnections();
+  const { canOpenChat, setActivePeer, deviceNameMap, bleToAppMap } = useBleConnections();
 
   // Use the robust scanner hook
   const { devices: nodes, isScanning: scanning, error: scanError, startScan, stopScan } = useBleScan();
@@ -109,6 +109,8 @@ export default function MeshVisualizationScreen() {
       <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
         {sortedNodes.map((node) => {
           const signal = rssiToSignal(node.rssi);
+          const appId = bleToAppMap[node.id];
+          const displayName = deviceNameMap[appId || node.id] || node.name || (node as any).localName || `Nearby Device (${node.id.slice(-4)})`;
           return (
             <View key={node.id} style={styles.row}>
               <View style={styles.rowLeft}>
@@ -116,7 +118,7 @@ export default function MeshVisualizationScreen() {
                   <MaterialIcons name="devices" size={18} color="#6961ff" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.nodeName} numberOfLines={1}>{deviceNameMap[node.id] || node.name || (node as any).localName || `Nearby Device (${node.id.slice(-4)})`}</Text>
+                  <Text style={styles.nodeName} numberOfLines={1}>{displayName}</Text>
                   <Text style={styles.nodeId}>ID: {node.id.slice(-4)}</Text>
                   <View style={styles.metaRow}>
                     <Text style={styles.nodeMeta}>
