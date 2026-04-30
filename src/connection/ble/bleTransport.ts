@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform, NativeModules, DeviceEventEmitter } from 'react-native';
+import { PermissionsAndroid, Platform, NativeModules, DeviceEventEmitter, Alert } from 'react-native';
 import { BleManager, Device, Subscription } from 'react-native-ble-plx';
 import { Buffer } from 'buffer';
 import { chunkMessage, processChunk } from './bleChunker';
@@ -20,7 +20,7 @@ let messageListeners: ((data: string) => void)[] = [];
 let isServerRunning = false;
 let isStartingServer = false;
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
 let connectionStateListeners: ((state: ConnectionState) => void)[] = [];
 
 export function onConnectionStateChange(cb: (state: ConnectionState) => void) {
@@ -58,6 +58,9 @@ function handleDisconnect(error: any, deviceId: string) {
     setTimeout(() => {
       connectToDeviceById(deviceId);
     }, 2000 * reconnectAttempts);
+  } else {
+    console.error(`[bleTransport] Final reconnect failure after ${MAX_RECONNECT} attempts.`);
+    emitConnectionState('failed');
   }
 }
 
@@ -201,15 +204,73 @@ export async function connectDirectly(deviceId: string): Promise<boolean> {
 }
 
 /**
+ * Helper to scan for a peripheral with the service UUID and return its BLE ID
+ */
+async function scanForPeripheral(timeoutMs = 10000): Promise<string> {
+  const manager = getBleManager();
+  // Ensure we have scan permissions on Android
+  if (Platform.OS === 'android') {
+    const granted = await requestBlePermissions();
+    if (!granted) throw new Error('BLE scan permission denied');
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      manager.stopDeviceScan();
+      reject(new Error('Scan timeout: Could not find peripheral'));
+    }, timeoutMs);
+
+    manager.startDeviceScan([SERVICE_UUID], null, (error, device) => {
+      if (error) {
+        clearTimeout(timeout);
+        manager.stopDeviceScan();
+        reject(error);
+        return;
+      }
+      if (device && device.id) {
+        console.log('[BLE] Found peripheral during QR scan:', device.name, device.id);
+        clearTimeout(timeout);
+        manager.stopDeviceScan();
+        resolve(device.id);
+      }
+    });
+  });
+}
+
+/**
  * Connect using explicit bleId with automatic retries for QR scanning reliability
  */
 export async function connectToDeviceById(bleId: string, retryCount = 0): Promise<boolean> {
   try {
-    console.log(`[BLE] Direct connecting to: ${bleId} (Attempt: ${retryCount + 1})`);
-    emitConnectionState('connecting');
     const manager = getBleManager();
+    let targetBleId = bleId;
 
-    const device = await manager.connectToDevice(bleId, {
+    // If we need to scan for an unknown peripheral we must have Android scan permissions first
+    if (!targetBleId || targetBleId.includes("unknown") || targetBleId.length < 5) {
+           reject(new Error("Scan timeout: Could not find peripheral"));
+         }, 10000);
+
+         manager.startDeviceScan([SERVICE_UUID], null, (error, device) => {
+           if (error) {
+             clearTimeout(timeout);
+             manager.stopDeviceScan();
+             reject(error);
+             return;
+           }
+           if (device) {
+             console.log('[BLE] Found peripheral during QR scan:', device.name, device.id);
+             clearTimeout(timeout);
+             manager.stopDeviceScan();
+             resolve(device.id);
+           }
+         });
+       });
+    }
+
+    console.log(`[BLE] Direct connecting to: ${targetBleId} (Attempt: ${retryCount + 1})`);
+    emitConnectionState('connecting');
+
+    const device = await manager.connectToDevice(targetBleId, {
       autoConnect: true,
     });
 
@@ -235,16 +296,24 @@ export async function connectToDeviceById(bleId: string, retryCount = 0): Promis
     if (disconnectSubscription) {
       disconnectSubscription.remove();
     }
-    disconnectSubscription = manager.onDeviceDisconnected(bleId, (err) => handleDisconnect(err, bleId));
+    disconnectSubscription = manager.onDeviceDisconnected(targetBleId, (err) => handleDisconnect(err, targetBleId));
     startMonitoring();
 
     return true;
   } catch (e) {
+    // If we failed after retries, report to UI and reset handling flag
     if (retryCount < 2) { // 3 total attempts
       console.warn(`[BLE] Connection attempt ${retryCount + 1} failed. Retrying...`);
       return new Promise((resolve) => {
         setTimeout(() => resolve(connectToDeviceById(bleId, retryCount + 1)), 2000);
       });
+    }
+    // All retries exhausted – surface a clear error to the user
+    console.error('[BLE] All connection attempts failed for', bleId);
+    Alert.alert('Connection failed', 'Unable to connect to the device after multiple attempts. Please ensure Bluetooth is on and the devices are within range.');
+    releaseScanLock?.(400);
+    emitConnectionState('failed');
+    return false;
     }
     console.error("[BLE] Direct connect failed after 3 attempts:", e);
     emitConnectionState('disconnected');
@@ -287,10 +356,33 @@ function startMonitoring(): void {
   );
 }
 
+let isSendingBle = false;
+const bleSendQueue: { data: string, resolve: (val: boolean) => void }[] = [];
+
+async function processBleSendQueue() {
+  if (isSendingBle || bleSendQueue.length === 0) return;
+  isSendingBle = true;
+
+  while (bleSendQueue.length > 0) {
+    const { data, resolve } = bleSendQueue.shift()!;
+    const success = await doSendBLE(data);
+    resolve(success);
+  }
+
+  isSendingBle = false;
+}
+
 /**
- * Send data via BLE with chunking
+ * Queue data via BLE with chunking sequentially to prevent overflow
  */
 export async function sendBLE(data: string): Promise<boolean> {
+  return new Promise(resolve => {
+    bleSendQueue.push({ data, resolve });
+    processBleSendQueue();
+  });
+}
+
+async function doSendBLE(data: string): Promise<boolean> {
   const msgId = Math.random().toString(36).substring(7);
   const chunks = chunkMessage(msgId, data);
   console.log(`[bleTransport] Sending message ${msgId} in ${chunks.length} chunks`);
@@ -332,7 +424,7 @@ export async function sendBLE(data: string): Promise<boolean> {
       break;
     }
     
-    // Small delay between chunks to prevent flooding
+    // Strict delay between chunks to prevent overflow and parallel write errors
     await new Promise(resolve => setTimeout(resolve, 50));
   }
 

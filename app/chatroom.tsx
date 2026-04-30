@@ -207,7 +207,7 @@ export default function ChatRoomScreen() {
     );
   }
 
-  if (!connectedBLE && globalBleState !== 'reconnecting') {
+  if (!connectedBLE && globalBleState !== 'reconnecting' && globalBleState !== 'failed') {
     return (
       <View style={styles.root}>
         <View style={styles.notConnected}>
@@ -223,8 +223,9 @@ export default function ChatRoomScreen() {
   }
 
   const isReconnecting = globalBleState === 'reconnecting';
-  const headerStatus = isReconnecting ? 'Reconnecting' : (connectedBLE ? 'Connected' : 'Connecting');
-  const headerColor = isReconnecting ? '#eab308' : (connectedBLE ? '#22c55e' : '#ef4444');
+  const isFailed = globalBleState === 'failed';
+  const headerStatus = isFailed ? 'Connection Failed' : (isReconnecting ? 'Reconnecting' : (connectedBLE ? 'Connected' : 'Connecting'));
+  const headerColor = isFailed ? '#ef4444' : (isReconnecting ? '#eab308' : (connectedBLE ? '#22c55e' : '#ef4444'));
 
   return (
     <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : undefined}>

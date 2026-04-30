@@ -37,6 +37,7 @@ interface PendingMessage {
 
 const pendingQueue = new Map<string, PendingMessage>();
 const receivedMessageIds = new Set<string>();
+const recentAckPackets = new Map<string, MeshPacket>();
 
 export function resendPendingMessages() {
   console.log(`[bleMessaging] Resending ${pendingQueue.size} pending messages after reconnect`);
@@ -44,12 +45,26 @@ export function resendPendingMessages() {
     clearTimeout(pending.timer); // Clear old timer
     sendMessageReliable(pending.packet, pending.retries);
   }
+
+  // Resend recent ACKs to handle ACK loss during disconnect
+  console.log(`[bleMessaging] Resending ${recentAckPackets.size} recent ACKs`);
+  for (const ackPacket of recentAckPackets.values()) {
+    sendMessageBLE(ackPacket).catch(() => {});
+  }
 }
+
+const MAX_QUEUE_SIZE = 50;
 
 /**
  * Send message via real BLE transport with reliability (ACK + Retry)
  */
 export async function sendMessageReliable(packet: MeshPacket, initialRetries = 0): Promise<boolean> {
+  if (pendingQueue.size >= MAX_QUEUE_SIZE) {
+    console.error(`[bleMessaging] Queue full (${pendingQueue.size}). Rejecting message ${packet.id}`);
+    await updateMessageStatus(packet.id, 'failed').catch(() => {});
+    return false;
+  }
+
   return new Promise((resolve) => {
     const attemptSend = async (retries: number) => {
       try {
@@ -174,6 +189,13 @@ async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
           type: 'ACK',
           payload: { messageId: packet.id },
         };
+        
+        recentAckPackets.set(packet.id, ackPacket);
+        if (recentAckPackets.size > 20) {
+           const oldest = Array.from(recentAckPackets.keys())[0];
+           recentAckPackets.delete(oldest);
+        }
+        
         await sendMessageBLE(ackPacket);
       }
       return;
@@ -204,6 +226,12 @@ async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
       payload: { messageId: packet.id },
     };
 
+    recentAckPackets.set(packet.id, ackPacket);
+    if (recentAckPackets.size > 20) {
+       const oldest = Array.from(recentAckPackets.keys())[0];
+       recentAckPackets.delete(oldest);
+    }
+
     console.log('[bleMessaging] Sending ACK back for:', packet.id);
     await sendMessageBLE(ackPacket);
   } catch (error) {
@@ -211,5 +239,7 @@ async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
   }
 }
 
-// Initialize on module load
-initializeBLEMessaging();
+// Initialize on next tick to break circular dependency
+setTimeout(() => {
+  initializeBLEMessaging();
+}, 0);
