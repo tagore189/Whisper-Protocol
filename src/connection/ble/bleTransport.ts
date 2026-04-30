@@ -134,38 +134,52 @@ async function requestBlePermissions(): Promise<boolean> {
 }
 
 /**
- * Start GATT Server (Peripheral Mode)
+ * Start GATT Server (Peripheral Mode).
+ * @param advertisedName - BLE peripheral name to advertise. Defaults to DEVICE_NAME.
+ * On non-Android platforms this is a no-op that returns true immediately.
  */
-export async function startGattServer(): Promise<boolean> {
-  if (isServerRunning || isStartingServer || Platform.OS !== 'android') {
-    console.log('[bleTransport] Skipping GATT server start:', { isServerRunning, isStartingServer, platform: Platform.OS });
-    return isServerRunning;
+export async function startGattServer(advertisedName?: string): Promise<boolean> {
+  // iOS / web — peripheral role not managed here; treat as ready
+  if (Platform.OS !== 'android') {
+    return true;
   }
+
+  // Already running — no need to restart
+  if (isServerRunning) {
+    return true;
+  }
+
+  // Guard against concurrent start
+  if (isStartingServer) {
+    return false;
+  }
+
   if (!BLEPeripheral) {
     console.log('[bleTransport] BLEPeripheral not available');
     return false;
   }
 
+  const nameToUse = advertisedName ?? DEVICE_NAME;
   isStartingServer = true;
   try {
     console.log('[bleTransport] Requesting BLE permissions...');
     const hasPermissions = await requestBlePermissions();
-    console.log('[bleTransport] BLE permissions granted:', hasPermissions);
     if (!hasPermissions) {
+      console.warn('[bleTransport] BLE permissions denied');
       isStartingServer = false;
       return false;
     }
 
-    console.log('[bleTransport] Starting GATT Server setup...');
+    console.log('[bleTransport] Starting GATT Server as:', nameToUse);
     await BLEPeripheral.clean();
-    await BLEPeripheral.setName(DEVICE_NAME);
+    await BLEPeripheral.setName(nameToUse);
     await BLEPeripheral.addService(SERVICE_UUID, true);
     await BLEPeripheral.addCharacteristicToService(SERVICE_UUID, CHARACTERISTIC_UUID, 17, 26);
     await BLEPeripheral.start();
-    
+
     isServerRunning = true;
     isStartingServer = false;
-    console.log(`[bleTransport] GATT Server started and advertising on UUID: ${SERVICE_UUID}`);
+    console.log(`[bleTransport] GATT Server advertising as "${nameToUse}" on UUID: ${SERVICE_UUID}`);
     return true;
   } catch (error) {
     console.error('[bleTransport] Failed to start GATT Server:', error);
@@ -175,10 +189,10 @@ export async function startGattServer(): Promise<boolean> {
   }
 }
 
-export async function ensureAdvertising() {
+export async function ensureAdvertising(advertisedName?: string) {
   if (!isServerRunning) {
     console.warn('[bleTransport] Advertising stopped! Restarting GATT server...');
-    await startGattServer();
+    await startGattServer(advertisedName);
   }
 }
 
@@ -276,103 +290,139 @@ export async function connectToDeviceById(bleId: string, retryCount = 0): Promis
 }
 
 /**
- * Connect via a QR payload by scanning for any peripheral advertising SERVICE_UUID.
- * Does not require a pre-known BLE hardware ID.
+ * Connect via a QR payload.
  *
- * @param payload - The validated QrDiscoveryPayload from the scanned QR code.
- * @returns true if connected successfully, throws on failure.
+ * Scans by payload.serviceUUID first (5 s), matching device by advertisedName.
+ * Falls back to an unfiltered scan (5 s) with manual UUID/name check.
+ * All timeouts are tight to keep total connection time under 5-8 s.
  */
 export async function connectViaQRPayload(payload: {
   deviceId: string;
   deviceName: string;
+  advertisedName: string;
   serviceUUID: string;
   sessionToken: string;
   timestamp: number;
 }): Promise<boolean> {
   const manager = getBleManager();
 
-  // 1. Ensure BLE permissions
+  // 1. Permissions
   const hasPermissions = await requestBlePermissions();
   if (!hasPermissions) {
     throw new Error('Bluetooth permissions are required. Please grant them in Settings.');
   }
 
-  // 2. Wait for BLE to be powered on (up to 5 s)
+  // 2. Wait for BLE powered on — 3 s max
   await withTimeout(
     new Promise<void>((resolve) => {
       const sub = manager.onStateChange((state) => {
-        if (state === 'PoweredOn') {
-          sub.remove();
-          resolve();
-        }
+        if (state === 'PoweredOn') { sub.remove(); resolve(); }
       }, true);
     }),
-    5000,
+    3000,
     'Bluetooth is not powered on. Please enable Bluetooth and try again.'
   );
 
-  // 3. Stop any existing scan
+  // 3. Stop any lingering scan
   try { manager.stopDeviceScan(); } catch (_) {}
 
   emitConnectionState('connecting');
 
-  // 4. Scan for the peripheral advertising SERVICE_UUID (8 s timeout)
-  const targetBleId = await withTimeout(
-    new Promise<string>((resolve, reject) => {
-      manager.startDeviceScan([SERVICE_UUID], { allowDuplicates: false }, (error, device) => {
-        if (error) {
-          manager.stopDeviceScan();
-          reject(error);
-          return;
-        }
-        if (device && device.id) {
-          console.log('[BLE] QR-scan found peripheral:', device.name, device.id);
-          manager.stopDeviceScan();
-          resolve(device.id);
-        }
-      });
-    }),
-    8000,
-    'Device not found. Make sure the other phone is showing QR and Bluetooth is on.'
-  );
+  /** Returns true if the scanned device matches the QR target by name */
+  const isNameMatch = (device: Device): boolean =>
+    device.name === payload.advertisedName ||
+    (device as any).localName === payload.advertisedName;
 
-  // 5. Connect to the found peripheral
-  const device = await withTimeout(
-    manager.connectToDevice(targetBleId, { autoConnect: false }),
-    10000,
-    'Connection timed out'
-  );
+  // 4a. Primary scan: filtered by serviceUUID, match by name — 5 s
+  let targetBleId: string | null = null;
+  console.log('[BLE] QR primary scan started (serviceUUID filter, name match):', payload.advertisedName);
 
-  // 6. Request MTU 512 on Android
-  if (Platform.OS === 'android') {
+  try {
+    targetBleId = await withTimeout(
+      new Promise<string>((resolve, reject) => {
+        manager.startDeviceScan([payload.serviceUUID], { allowDuplicates: false }, (error, device) => {
+          if (error) { manager.stopDeviceScan(); reject(error); return; }
+          if (device) {
+            console.log('[BLE] Device found (primary):', device.name, device.id);
+            if (isNameMatch(device)) {
+              console.log('[BLE] Matched device (primary):', device.name, device.id);
+              manager.stopDeviceScan();
+              resolve(device.id);
+            }
+          }
+        });
+      }),
+      5000,
+      '__primary_timeout__'
+    );
+  } catch (e: any) {
+    if (e?.message !== '__primary_timeout__') throw e;
+    console.log('[BLE] Primary scan timed out, trying fallback...');
+    try { manager.stopDeviceScan(); } catch (_) {}
+  }
+
+  // 4b. Fallback scan: no UUID filter, manual name+UUID check — 5 s
+  if (!targetBleId) {
+    console.log('[BLE] QR fallback scan started (no filter)');
     try {
-      await device.requestMTU(512);
-      console.log('[bleTransport] MTU 512 requested');
+      targetBleId = await withTimeout(
+        new Promise<string>((resolve, reject) => {
+          manager.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
+            if (error) { manager.stopDeviceScan(); reject(error); return; }
+            if (device) {
+              console.log('[BLE] Device found (fallback):', device.name, device.id);
+              const uuidMatch = (device.serviceUUIDs ?? []).some(
+                (u) => u.toLowerCase() === payload.serviceUUID.toLowerCase()
+              );
+              if (isNameMatch(device) || uuidMatch) {
+                console.log('[BLE] Matched device (fallback):', device.name, device.id);
+                manager.stopDeviceScan();
+                resolve(device.id);
+              }
+            }
+          });
+        }),
+        5000,
+        'Device not found. Make sure the other phone is showing QR and Bluetooth is on.'
+      );
     } catch (e) {
-      console.warn('[bleTransport] MTU request failed:', e);
+      try { manager.stopDeviceScan(); } catch (_) {}
+      throw e;
     }
   }
 
-  // 7. Discover services and characteristics
+  // 5. Connect — 7 s
+  console.log('[BLE] Connecting to matched device:', targetBleId);
+  const device = await withTimeout(
+    manager.connectToDevice(targetBleId, { autoConnect: false }),
+    7000,
+    'Connection timed out'
+  );
+
+  // 6. MTU 512 on Android
+  if (Platform.OS === 'android') {
+    try { await device.requestMTU(512); console.log('[bleTransport] MTU 512 requested'); }
+    catch (e) { console.warn('[bleTransport] MTU request failed:', e); }
+  }
+
+  // 7. Discover services — 5 s
+  console.log('[BLE] Discovering services for:', targetBleId);
   const connected = await withTimeout(
     device.discoverAllServicesAndCharacteristics(),
-    8000,
+    5000,
     'Service discovery timed out'
   );
+  console.log('[BLE] Discovery complete for:', targetBleId);
 
   connectedDevice = connected;
   reconnectAttempts = 0;
 
-  // 8. Set up disconnect handler
-  if (disconnectSubscription) {
-    disconnectSubscription.remove();
-  }
-  disconnectSubscription = manager.onDeviceDisconnected(targetBleId, (err) => handleDisconnect(err, targetBleId));
+  // 8. Disconnect handler
+  if (disconnectSubscription) disconnectSubscription.remove();
+  disconnectSubscription = manager.onDeviceDisconnected(targetBleId, (err) => handleDisconnect(err, targetBleId!));
 
-  // 9. Start monitoring incoming messages
+  // 9. Monitor + emit
   startMonitoring();
-
-  // 10. Emit connected state
   emitConnectionState('connected');
   resendPendingMessages();
 

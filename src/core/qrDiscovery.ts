@@ -9,6 +9,8 @@ export type QrDiscoveryPayload = {
   version: typeof QR_DISCOVERY_VERSION;
   deviceId: string;
   deviceName: string;
+  /** BLE advertised peripheral name — used by scanner to match the exact device */
+  advertisedName: string;
   serviceUUID: string;
   sessionToken: string;
   timestamp: number;
@@ -21,13 +23,15 @@ export type QrValidationResult =
 export function createQrDiscoveryPayload(
   deviceId: string,
   deviceName: string,
-  serviceUUID: string
+  serviceUUID: string,
+  advertisedName: string
 ): QrDiscoveryPayload {
   return {
     type: QR_DISCOVERY_TYPE,
     version: QR_DISCOVERY_VERSION,
     deviceId,
     deviceName,
+    advertisedName,
     serviceUUID,
     sessionToken: Crypto.randomUUID(),
     timestamp: Date.now(),
@@ -48,6 +52,8 @@ export function parseQrDiscoveryPayload(raw: string): QrDiscoveryPayload | null 
       parsed.deviceId.trim().length === 0 ||
       typeof parsed.deviceName !== "string" ||
       parsed.deviceName.trim().length === 0 ||
+      typeof parsed.advertisedName !== "string" ||
+      parsed.advertisedName.trim().length === 0 ||
       typeof parsed.serviceUUID !== "string" ||
       parsed.serviceUUID.trim().length === 0 ||
       typeof parsed.sessionToken !== "string" ||
@@ -63,6 +69,7 @@ export function parseQrDiscoveryPayload(raw: string): QrDiscoveryPayload | null 
       version: QR_DISCOVERY_VERSION,
       deviceId: parsed.deviceId.trim(),
       deviceName: parsed.deviceName.trim(),
+      advertisedName: parsed.advertisedName.trim(),
       serviceUUID: parsed.serviceUUID.trim(),
       sessionToken: parsed.sessionToken.trim(),
       timestamp: parsed.timestamp,

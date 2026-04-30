@@ -34,7 +34,7 @@ type BleConnectionContextValue = {
   connectedDevices: ConnectedDevice[];
   handshakeDevices: ConnectedDevice[];
   beginHandshake: (device: { id: string; name: string }) => Promise<void>;
-  connectDirectlySkipHandshake: (device: { id: string; name: string; serviceUUID: string; sessionToken: string; timestamp: number }) => Promise<void>;
+  connectDirectlySkipHandshake: (device: { id: string; name: string; advertisedName: string; serviceUUID: string; sessionToken: string; timestamp: number }) => Promise<void>;
   acceptHandshake: (requestId: string, peer: { id: string; name: string }) => Promise<void>;
   removeConnected: (deviceId: string) => void;
   isConnected: (deviceId: string) => boolean;
@@ -252,23 +252,22 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   );
 
   const connectDirectlySkipHandshake = useCallback(
-    async (device: { id: string; name: string; serviceUUID: string; sessionToken: string; timestamp: number }) => {
+    async (device: { id: string; name: string; advertisedName: string; serviceUUID: string; sessionToken: string; timestamp: number }) => {
       if (!settings.deviceId) throw new Error('Identity unavailable');
 
-      console.log('[qr-connect] Starting QR→BLE connect to peer:', device.id, 'serviceUUID:', device.serviceUUID);
+      console.log('[qr-connect] Starting QR→BLE connect to peer:', device.id, 'advertisedName:', device.advertisedName);
       clearPeerTimer(device.id);
 
       try {
-        // Scan for any peripheral advertising SERVICE_UUID, then connect
         await connectViaQRPayload({
           deviceId: device.id,
           deviceName: device.name,
+          advertisedName: device.advertisedName,
           serviceUUID: device.serviceUUID,
           sessionToken: device.sessionToken,
           timestamp: device.timestamp,
         });
 
-        // Skip handshake – set peer state directly to CONNECTED
         setPeerState(device.id, device.name, 'CONNECTED');
         console.log('[qr-connect] Connected to peer:', device.id);
       } catch (error) {

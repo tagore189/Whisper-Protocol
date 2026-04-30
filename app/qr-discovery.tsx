@@ -23,9 +23,10 @@ import {
   QR_DISCOVERY_EXPIRATION_MS,
   validateQrDiscoveryPayload,
 } from "../src/core/qrDiscovery";
-import { SERVICE_UUID } from "../src/connection/ble/bleTransport";
+import { SERVICE_UUID, startGattServer } from "../src/connection/ble/bleTransport";
 
 type ScreenMode = "show" | "scan";
+type AdvertisingState = "idle" | "starting" | "active" | "failed";
 
 const SCAN_DUPLICATE_COOLDOWN_MS = 2500;
 const SCAN_EVENT_THROTTLE_MS = 350;
@@ -42,39 +43,58 @@ export default function QrDiscoveryScreen() {
   const { connectDirectlySkipHandshake } = useBleConnections();
   const [permission, requestPermission] = useCameraPermissions();
   const [isHandlingScan, setIsHandlingScan] = useState(false);
+  const [advertisingState, setAdvertisingState] = useState<AdvertisingState>("idle");
 
-  // QR payload uses the stable SERVICE_UUID so the scanner can find us via BLE scan
+  // Stable advertised BLE peripheral name derived from device ID.
+  // The scanner uses this name to match the exact peer device during BLE scan.
+  const advertisedName = settings.deviceId
+    ? `FortiLink-${settings.deviceId.slice(-6)}`
+    : "FortiLink";
+
   const [qrPayload, setQrPayload] = useState(() =>
-    createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID)
+    createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID, advertisedName)
   );
   const [refreshTick, setRefreshTick] = useState(Date.now());
   const lastScanRef = useRef<{ signature: string; scannedAt: number } | null>(null);
   const lastScanAttemptRef = useRef(0);
   const resetScanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Regenerate payload when identity loads
   useEffect(() => {
     if (!settings.deviceId) return;
-    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID));
-  }, [settings.deviceId, settings.deviceName]);
+    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID, advertisedName));
+  }, [settings.deviceId, settings.deviceName, advertisedName]);
 
+  // Countdown timer for expiry display
   useEffect(() => {
-    if (screenMode !== "show") {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setRefreshTick(Date.now());
-    }, 1000);
-
+    if (screenMode !== "show") return;
+    const interval = setInterval(() => setRefreshTick(Date.now()), 1000);
     return () => clearInterval(interval);
   }, [screenMode]);
 
+  // Refresh QR on expiry
   useEffect(() => {
     if (screenMode === "show" && refreshTick - qrPayload.timestamp >= QR_DISCOVERY_EXPIRATION_MS) {
-      setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID));
+      setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID, advertisedName));
     }
-  }, [qrPayload.timestamp, refreshTick, screenMode, settings.deviceId, settings.deviceName]);
+  }, [qrPayload.timestamp, refreshTick, screenMode, settings.deviceId, settings.deviceName, advertisedName]);
 
+  // Start BLE advertising when showing QR
+  useEffect(() => {
+    if (screenMode !== "show") return;
+    if (!settings.deviceId) return;
+
+    setAdvertisingState("starting");
+    startGattServer(advertisedName)
+      .then((ok) => {
+        setAdvertisingState(ok ? "active" : "failed");
+      })
+      .catch(() => {
+        setAdvertisingState("failed");
+      });
+  }, [screenMode, settings.deviceId, advertisedName]);
+
+  // Cleanup scan lock timeout on unmount
   useEffect(
     () => () => {
       if (resetScanTimeoutRef.current) {
@@ -86,7 +106,7 @@ export default function QrDiscoveryScreen() {
   );
 
   const regenerateQrCode = () => {
-    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID));
+    setQrPayload(createQrDiscoveryPayload(settings.deviceId, settings.deviceName, SERVICE_UUID, advertisedName));
     setRefreshTick(Date.now());
   };
 
@@ -101,14 +121,10 @@ export default function QrDiscoveryScreen() {
   }, []);
 
   const handleBarcodeScanned = useCallback(async ({ data }: { data: string }) => {
-    if (isHandlingScan) {
-      return;
-    }
+    if (isHandlingScan) return;
 
     const now = Date.now();
-    if (now - lastScanAttemptRef.current < SCAN_EVENT_THROTTLE_MS) {
-      return;
-    }
+    if (now - lastScanAttemptRef.current < SCAN_EVENT_THROTTLE_MS) return;
     lastScanAttemptRef.current = now;
 
     const parsed = parseQrDiscoveryPayload(data);
@@ -136,21 +152,21 @@ export default function QrDiscoveryScreen() {
       await connectDirectlySkipHandshake({
         id: validation.payload.deviceId,
         name: validation.payload.deviceName,
+        advertisedName: validation.payload.advertisedName,
         serviceUUID: validation.payload.serviceUUID,
         sessionToken: validation.payload.sessionToken,
         timestamp: validation.payload.timestamp,
       });
 
-      // Navigate to chatroom after successful connection
       router.push(
         (`/chatroom?peerId=${encodeURIComponent(validation.payload.deviceId)}&peerName=${encodeURIComponent(validation.payload.deviceName)}` as Href),
       );
     } catch (error: any) {
       const msg =
-        error?.message?.includes('not found') || error?.message?.includes('timeout')
-          ? 'Device not found. Make sure the other phone is showing QR and Bluetooth is on.'
-          : error?.message || 'Could not connect to the device. Please try again.';
-      Alert.alert('Connection failed', msg);
+        error?.message?.includes("not found") || error?.message?.includes("timeout")
+          ? "Device not found. Make sure the other phone is showing QR and Bluetooth is on."
+          : error?.message || "Could not connect to the device. Please try again.";
+      Alert.alert("Connection failed", msg);
       releaseScanLock(400);
     }
   }, [connectDirectlySkipHandshake, isHandlingScan, releaseScanLock, router, settings.deviceId]);
@@ -188,32 +204,67 @@ export default function QrDiscoveryScreen() {
       </View>
 
       {screenMode === "show" ? (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Text style={styles.title}>Share this code with the other device</Text>
-          <Text style={styles.subtitle}>The QR contains your device identity and a short-lived session token.</Text>
-
-          <View style={styles.qrCard}>
-            <QRCode
-              value={encodeQrDiscoveryPayload(qrPayload)}
-              size={240}
-              backgroundColor="#ffffff"
-              color="#111827"
-            />
+        // ── Show QR mode ────────────────────────────────────────────────────
+        advertisingState === "starting" || advertisingState === "idle" ? (
+          <View style={styles.centerCard}>
+            <ActivityIndicator size="large" color="#6961ff" />
+            <Text style={styles.centerTitle}>Starting Bluetooth advertising…</Text>
+            <Text style={styles.centerBody}>
+              Please wait while Bluetooth is configured. This usually takes 1–2 seconds.
+            </Text>
           </View>
-
-          <View style={styles.infoCard}>
-            <InfoRow label="Device name" value={settings.deviceName} />
-            <InfoRow label="Device ID" value={settings.deviceId} />
-            <InfoRow label="Session token" value={qrPayload.sessionToken} />
-            <InfoRow label="Expires in" value={`${secondsRemaining}s`} />
+        ) : advertisingState === "failed" ? (
+          <View style={styles.centerCard}>
+            <MaterialIcons name="bluetooth-disabled" size={48} color="#ef4444" />
+            <Text style={styles.centerTitle}>Bluetooth advertising failed</Text>
+            <Text style={styles.centerBody}>
+              Turn Bluetooth on and reopen this screen. Make sure the app has Bluetooth permission.
+            </Text>
+            <Pressable
+              style={styles.primaryBtn}
+              onPress={() => {
+                setAdvertisingState("starting");
+                startGattServer(advertisedName)
+                  .then((ok) => setAdvertisingState(ok ? "active" : "failed"))
+                  .catch(() => setAdvertisingState("failed"));
+              }}
+            >
+              <MaterialIcons name="refresh" size={18} color="#fff" />
+              <Text style={styles.primaryBtnText}>Retry</Text>
+            </Pressable>
           </View>
+        ) : (
+          // advertisingState === "active"
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <Text style={styles.title}>Share this code with the other device</Text>
+            <Text style={styles.subtitle}>
+              The QR contains your device identity and a short-lived session token.
+            </Text>
 
-          <Pressable style={styles.primaryBtn} onPress={regenerateQrCode}>
-            <MaterialIcons name="refresh" size={18} color="#fff" />
-            <Text style={styles.primaryBtnText}>Refresh QR</Text>
-          </Pressable>
-        </ScrollView>
+            <View style={styles.qrCard}>
+              <QRCode
+                value={encodeQrDiscoveryPayload(qrPayload)}
+                size={240}
+                backgroundColor="#ffffff"
+                color="#111827"
+              />
+            </View>
+
+            <View style={styles.infoCard}>
+              <InfoRow label="Device name" value={settings.deviceName} />
+              <InfoRow label="Advertised as" value={advertisedName} />
+              <InfoRow label="Session token" value={qrPayload.sessionToken} />
+              <InfoRow label="Expires in" value={`${secondsRemaining}s`} />
+            </View>
+
+            <Pressable style={styles.primaryBtn} onPress={regenerateQrCode}>
+              <MaterialIcons name="refresh" size={18} color="#fff" />
+              <Text style={styles.primaryBtnText}>Refresh QR</Text>
+            </Pressable>
+          </ScrollView>
+        )
       ) : (
+        // ── Scan QR mode ─────────────────────────────────────────────────────
         <View style={styles.scanWrap}>
           {Platform.OS === "web" ? (
             <View style={styles.centerCard}>
@@ -251,11 +302,13 @@ export default function QrDiscoveryScreen() {
               </View>
               <View style={styles.scanPanel}>
                 <Text style={styles.centerTitle}>Point the camera at the other device</Text>
-                <Text style={styles.centerBody}>Self-scans are blocked, expired codes are rejected, and duplicate scan events are ignored.</Text>
+                <Text style={styles.centerBody}>
+                  Self-scans are blocked, expired codes are rejected, and duplicate scan events are ignored.
+                </Text>
                 {isHandlingScan && (
                   <View style={styles.processingRow}>
                     <ActivityIndicator size="small" color="#6961ff" />
-                    <Text style={styles.processingText}>Processing scan...</Text>
+                    <Text style={styles.processingText}>Scanning for device via Bluetooth…</Text>
                   </View>
                 )}
               </View>
