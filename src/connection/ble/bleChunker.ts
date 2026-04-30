@@ -4,7 +4,7 @@
  * and reassembling them on the receiver side.
  */
 
-const CHUNK_SIZE = 10; // Extra safe for any BLE device
+const CHUNK_SIZE = 40; // Increased for better throughput
 
 interface PendingMessage {
   chunks: string[];
@@ -59,12 +59,9 @@ export function processChunk(chunk: string): string | null {
       return fullMessage;
     }
     
-    // Cleanup old pending messages (older than 30s)
+    // Cleanup old pending messages dynamically, but we also have interval
     if (pendingMessages.size > 20) {
-      const now = Date.now();
-      for (const [id, p] of pendingMessages.entries()) {
-        if (now - p.lastSeen > 30000) pendingMessages.delete(id);
-      }
+      cleanupPending();
     }
     
     return null;
@@ -73,3 +70,16 @@ export function processChunk(chunk: string): string | null {
     return null;
   }
 }
+
+function cleanupPending() {
+  const now = Date.now();
+  for (const [id, p] of pendingMessages.entries()) {
+    if (now - p.lastSeen > 30000) {
+       console.log(`[bleChunker] Dropping incomplete message ${id}`);
+       pendingMessages.delete(id);
+    }
+  }
+}
+
+// Active cleanup every 10s
+setInterval(cleanupPending, 10000);

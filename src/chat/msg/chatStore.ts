@@ -113,7 +113,7 @@ export async function getMessagesWithPeer(
 
 export async function updateMessageStatus(
   messageId: string,
-  status: 'sent' | 'delivered' | 'read'
+  status: 'sent' | 'delivered' | 'read' | 'failed'
 ) {
   const msg = await localDatabase.getMessage(messageId);
   if (!msg) {

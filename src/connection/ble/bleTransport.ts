@@ -14,9 +14,51 @@ export const DEVICE_NAME = 'FL';
 let bleManager: BleManager | null = null;
 export let connectedDevice: Device | null = null;
 let monitorUnsubscribe: Subscription | null = null;
+let disconnectSubscription: Subscription | null = null;
 let messageListeners: ((data: string) => void)[] = [];
 let isServerRunning = false;
 let isStartingServer = false;
+
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+let connectionStateListeners: ((state: ConnectionState) => void)[] = [];
+
+export function onConnectionStateChange(cb: (state: ConnectionState) => void) {
+  connectionStateListeners.push(cb);
+}
+
+function emitConnectionState(state: ConnectionState) {
+  connectionStateListeners.forEach(cb => {
+    try { cb(state); } catch(e) {}
+  });
+}
+
+let reconnectAttempts = 0;
+const MAX_RECONNECT = 5;
+
+// Disconnect handler for auto-reconnect
+function handleDisconnect(error: any, deviceId: string) {
+  console.log('[bleTransport] Disconnected from', deviceId, error);
+  connectedDevice = null;
+  if (monitorUnsubscribe) {
+    monitorUnsubscribe.remove();
+    monitorUnsubscribe = null;
+  }
+  if (disconnectSubscription) {
+    disconnectSubscription.remove();
+    disconnectSubscription = null;
+  }
+  
+  emitConnectionState('disconnected');
+  
+  if (reconnectAttempts < MAX_RECONNECT) {
+    reconnectAttempts++;
+    console.log(`[bleTransport] Reconnecting... Attempt ${reconnectAttempts}`);
+    emitConnectionState('reconnecting');
+    setTimeout(() => {
+      connectToDeviceById(deviceId);
+    }, 2000 * reconnectAttempts);
+  }
+}
 
 // Map custom deviceId to BLE device.id
 export const bleDeviceMap: Record<string, string> = {};
@@ -146,20 +188,7 @@ function scanAndConnect() {
  * Connect directly to a device by ID
  */
 export async function connectDirectly(deviceId: string): Promise<boolean> {
-  try {
-    const manager = getBleManager();
-    console.log('[bleTransport] Connecting directly to:', deviceId);
-    
-    const device = await manager.connectToDevice(deviceId);
-    await device.discoverAllServicesAndCharacteristics();
-    connectedDevice = device;
-    
-    startMonitoring();
-    return true;
-  } catch (error) {
-    console.error('[bleTransport] Direct connection failed:', error);
-    return false;
-  }
+  return connectToDeviceById(deviceId);
 }
 
 /**
@@ -168,27 +197,49 @@ export async function connectDirectly(deviceId: string): Promise<boolean> {
 export async function connectToDeviceById(bleId: string) {
   try {
     console.log("[BLE] Direct connecting to:", bleId);
-
+    emitConnectionState('connecting');
     const manager = getBleManager();
 
     const device = await manager.connectToDevice(bleId, {
       autoConnect: true,
     });
 
-    const connected = await device.discoverAllServicesAndCharacteristics();
+    if (Platform.OS === 'android') {
+      try {
+        await device.requestMTU(512);
+        console.log('[bleTransport] Requested MTU 512');
+      } catch (e) {
+        console.warn('[bleTransport] MTU request failed:', e);
+      }
+    }
 
+    const connected = await device.discoverAllServicesAndCharacteristics();
     connectedDevice = connected;
+    reconnectAttempts = 0; // Reset on success
 
     console.log("[BLE] Connected via QR");
+    emitConnectionState('connected');
 
+    if (disconnectSubscription) {
+      disconnectSubscription.remove();
+    }
+    disconnectSubscription = manager.onDeviceDisconnected(bleId, (err) => handleDisconnect(err, bleId));
     startMonitoring();
 
     return true;
   } catch (e) {
     console.error("[BLE] Direct connect failed:", e);
+    emitConnectionState('disconnected');
     startScanAndConnect();
     return false;
   }
+}
+
+/**
+ * QR-based connection alias
+ */
+export async function connectViaQR(scannedData: { deviceId: string; serviceUUID?: string; bleId: string }) {
+  return connectToDeviceById(scannedData.bleId);
 }
 
 /**
@@ -275,9 +326,19 @@ export function onBLEMessage(callback: (data: string) => void): void {
 }
 
 export async function disconnectBLE(): Promise<boolean> {
-  if (monitorUnsubscribe) monitorUnsubscribe.remove();
-  if (connectedDevice) await connectedDevice.cancelConnection();
+  if (monitorUnsubscribe) {
+    monitorUnsubscribe.remove();
+    monitorUnsubscribe = null;
+  }
+  if (disconnectSubscription) {
+    disconnectSubscription.remove();
+    disconnectSubscription = null;
+  }
+  if (connectedDevice) {
+    await connectedDevice.cancelConnection();
+  }
   connectedDevice = null;
+  emitConnectionState('disconnected');
   return true;
 }
 

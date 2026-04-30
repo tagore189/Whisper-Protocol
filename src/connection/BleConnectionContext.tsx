@@ -10,7 +10,7 @@ import React, {
 import * as Crypto from "expo-crypto";
 import { useAppSettings } from "../core/AppSettingsContext";
 import { onMessageReceived, sendMessageBLE } from "./ble/bleMessaging";
-import { connectDirectly, connectToDeviceById, isConnected as isBLEConnected } from "./ble/bleTransport";
+import { connectDirectly, connectToDeviceById, isConnected as isBLEConnected, onConnectionStateChange } from "./ble/bleTransport";
 import type { MeshPacket } from "./mesh/packet";
 import { localDatabase } from "../storage/localDatabase";
 
@@ -40,6 +40,7 @@ type BleConnectionContextValue = {
   isConnected: (deviceId: string) => boolean;
   getConnectionState: (deviceId: string) => HandshakeState;
   canOpenChat: (deviceId: string) => boolean;
+  globalBleState: string;
 };
 
 const BleConnectionContext = createContext<BleConnectionContextValue | null>(null);
@@ -54,6 +55,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   const devicesByIdRef = useRef<Record<string, ConnectedDevice>>({});
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastSeenRef = useRef<Map<string, number>>(new Map());
+  const [globalBleState, setGlobalBleState] = useState<string>('disconnected');
 
   useEffect(() => {
     devicesByIdRef.current = devicesById;
@@ -199,6 +201,21 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
     onMessageReceived(processPacket);
   }, [processPacket]);
 
+  // Listen to low-level BLE transport state
+  useEffect(() => {
+    onConnectionStateChange((state) => {
+      console.log('[BleConnectionContext] Global Connection State:', state);
+      setGlobalBleState(state);
+      if (state === 'disconnected') {
+        Object.values(devicesByIdRef.current).forEach(d => {
+          if (d.handshakeState === 'CONNECTED') {
+            setPeerState(d.id, d.name, 'FAILED', { lastError: 'BLE device disconnected' });
+          }
+        });
+      }
+    });
+  }, [setPeerState]);
+
   // Load existing connections from local DB
   useEffect(() => {
     const loadLocal = async () => {
@@ -325,6 +342,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         isConnected,
         getConnectionState,
         canOpenChat,
+        globalBleState,
       }}
     >
       {children}
@@ -345,6 +363,7 @@ export function useBleConnections(): BleConnectionContextValue {
       isConnected: () => false,
       getConnectionState: () => "IDLE",
       canOpenChat: () => false,
+      globalBleState: 'disconnected',
     };
   }
   return ctx;

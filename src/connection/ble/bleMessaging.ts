@@ -26,25 +26,72 @@ function emitMessage(packet: MeshPacket) {
   });
 }
 
+const PENDING_TIMEOUT = 5000;
+const MAX_RETRIES = 3;
+
+interface PendingMessage {
+  packet: MeshPacket;
+  retries: number;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingQueue = new Map<string, PendingMessage>();
+
 /**
- * Send message via real BLE transport
+ * Send message via real BLE transport with reliability (ACK + Retry)
+ */
+export async function sendMessageReliable(packet: MeshPacket): Promise<boolean> {
+  return new Promise((resolve) => {
+    const attemptSend = async (retries: number) => {
+      try {
+        console.log(`[bleMessaging] Sending packet: ${packet.id} (Retry: ${retries})`);
+        const jsonData = JSON.stringify(packet);
+        const success = await sendBLE(jsonData);
+
+        if (!success) {
+          console.error('[bleMessaging] Failed to send via BLE directly.');
+          if (retries >= MAX_RETRIES) {
+             await updateMessageStatus(packet.id, 'failed').catch(() => {});
+             resolve(false);
+          } else {
+             const timer = setTimeout(() => attemptSend(retries + 1), PENDING_TIMEOUT);
+             pendingQueue.set(packet.id, { packet, retries: retries + 1, timer });
+          }
+          return;
+        }
+
+        // Successfully written to BLE, wait for ACK
+        const timer = setTimeout(() => {
+          console.warn(`[bleMessaging] ACK timeout for ${packet.id}`);
+          if (retries >= MAX_RETRIES) {
+            console.error(`[bleMessaging] Max retries reached for ${packet.id}. Failing.`);
+            pendingQueue.delete(packet.id);
+            updateMessageStatus(packet.id, 'failed').catch(() => {});
+            resolve(false);
+          } else {
+            attemptSend(retries + 1);
+          }
+        }, PENDING_TIMEOUT);
+
+        pendingQueue.set(packet.id, { packet, retries, timer });
+
+      } catch (e) {
+        console.error('[bleMessaging] Error in attemptSend:', e);
+        resolve(false);
+      }
+    };
+
+    attemptSend(0);
+    // Resolve true immediately as it is successfully queued
+    resolve(true);
+  });
+}
+
+/**
+ * Send message via real BLE transport (legacy, keeping for backwards compatibility)
  */
 export async function sendMessageBLE(packet: MeshPacket): Promise<void> {
-  try {
-    console.log('[bleMessaging] Sending packet via BLE:', packet.id, packet.type);
-
-    // Serialize to JSON
-    const jsonData = JSON.stringify(packet);
-
-    // Send via BLE
-    const success = await sendBLE(jsonData);
-
-    if (!success) {
-      console.error('[bleMessaging] Failed to send via BLE');
-    }
-  } catch (error) {
-    console.error('[bleMessaging] Error in sendMessageBLE:', error);
-  }
+  await sendMessageReliable(packet);
 }
 
 /**
@@ -75,9 +122,16 @@ async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
   try {
     // Handle ACK messages
     if (packet.type === 'ACK') {
-      console.log('[bleMessaging] Received ACK for:', packet.payload?.messageId);
-      if (packet.payload?.messageId) {
-        await updateMessageStatus(packet.payload.messageId, 'delivered');
+      const msgId = packet.payload?.messageId;
+      console.log('[bleMessaging] Received ACK for:', msgId);
+      
+      if (msgId) {
+        if (pendingQueue.has(msgId)) {
+          const pending = pendingQueue.get(msgId)!;
+          clearTimeout(pending.timer);
+          pendingQueue.delete(msgId);
+        }
+        await updateMessageStatus(msgId, 'delivered');
       }
       emitMessage(packet);
       return;
