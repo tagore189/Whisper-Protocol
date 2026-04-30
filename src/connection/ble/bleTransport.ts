@@ -19,6 +19,7 @@ let disconnectSubscription: Subscription | null = null;
 let messageListeners: ((data: string) => void)[] = [];
 let isServerRunning = false;
 let isStartingServer = false;
+let currentAdvertisedName: string | null = null;
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed';
 let connectionStateListeners: ((state: ConnectionState) => void)[] = [];
@@ -144,9 +145,18 @@ export async function startGattServer(advertisedName?: string): Promise<boolean>
     return true;
   }
 
-  // Already running — no need to restart
-  if (isServerRunning) {
+  const nameToUse = advertisedName ?? DEVICE_NAME;
+
+  // Already running with the same name — nothing to do
+  if (isServerRunning && currentAdvertisedName === nameToUse) {
     return true;
+  }
+
+  // Already running but name changed — tear down first so we can restart
+  if (isServerRunning && currentAdvertisedName !== nameToUse) {
+    console.log(`[bleTransport] Name changed ("${currentAdvertisedName}" → "${nameToUse}"), restarting advertising...`);
+    try { await BLEPeripheral.clean(); } catch (_) {}
+    isServerRunning = false;
   }
 
   // Guard against concurrent start
@@ -159,7 +169,6 @@ export async function startGattServer(advertisedName?: string): Promise<boolean>
     return false;
   }
 
-  const nameToUse = advertisedName ?? DEVICE_NAME;
   isStartingServer = true;
   try {
     console.log('[bleTransport] Requesting BLE permissions...');
@@ -179,12 +188,14 @@ export async function startGattServer(advertisedName?: string): Promise<boolean>
 
     isServerRunning = true;
     isStartingServer = false;
+    currentAdvertisedName = nameToUse;
     console.log(`[bleTransport] GATT Server advertising as "${nameToUse}" on UUID: ${SERVICE_UUID}`);
     return true;
   } catch (error) {
     console.error('[bleTransport] Failed to start GATT Server:', error);
     isStartingServer = false;
     isServerRunning = false;
+    currentAdvertisedName = null;
     return false;
   }
 }

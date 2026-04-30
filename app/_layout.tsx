@@ -22,7 +22,7 @@ function BLEInitializer() {
     const timer = setTimeout(() => {
       console.log('[BLEInitializer] Starting BLE services...');
       startScanAndConnect().catch(err => console.error('[BLE] Scan Error:', err));
-      startGattServer().catch(err => console.error('[BLE] Server Error:', err));
+      startGattServer(`FortiLink-${settings.deviceId.slice(-6)}`).catch(err => console.error('[BLE] Server Error:', err));
     }, 1000);
 
     return () => clearTimeout(timer);
