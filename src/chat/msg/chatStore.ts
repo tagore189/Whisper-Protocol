@@ -24,7 +24,7 @@ export async function saveMessage(packet: MeshPacket) {
     payload: packet.payload,
     content,
     type: packet.type,
-    status: packet.type === 'ACK' ? 'delivered' : 'sent',
+    status: packet.type === 'ACK' ? 'delivered' : 'sending',
   };
 
   // Check if message already exists

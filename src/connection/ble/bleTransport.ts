@@ -2,6 +2,7 @@ import { PermissionsAndroid, Platform, NativeModules, DeviceEventEmitter } from 
 import { BleManager, Device, Subscription } from 'react-native-ble-plx';
 import { Buffer } from 'buffer';
 import { chunkMessage, processChunk } from './bleChunker';
+import { resendPendingMessages } from './bleMessaging';
 
 const { BLEPeripheral } = NativeModules;
 
@@ -148,12 +149,20 @@ export async function startGattServer(): Promise<boolean> {
     
     isServerRunning = true;
     isStartingServer = false;
-    console.log('[bleTransport] GATT Server started and advertising');
+    console.log(`[bleTransport] GATT Server started and advertising on UUID: ${SERVICE_UUID}`);
     return true;
   } catch (error) {
     console.error('[bleTransport] Failed to start GATT Server:', error);
     isStartingServer = false;
+    isServerRunning = false;
     return false;
+  }
+}
+
+export async function ensureAdvertising() {
+  if (!isServerRunning) {
+    console.warn('[bleTransport] Advertising stopped! Restarting GATT server...');
+    await startGattServer();
   }
 }
 
@@ -192,11 +201,11 @@ export async function connectDirectly(deviceId: string): Promise<boolean> {
 }
 
 /**
- * Connect using explicit bleId
+ * Connect using explicit bleId with automatic retries for QR scanning reliability
  */
-export async function connectToDeviceById(bleId: string) {
+export async function connectToDeviceById(bleId: string, retryCount = 0): Promise<boolean> {
   try {
-    console.log("[BLE] Direct connecting to:", bleId);
+    console.log(`[BLE] Direct connecting to: ${bleId} (Attempt: ${retryCount + 1})`);
     emitConnectionState('connecting');
     const manager = getBleManager();
 
@@ -219,6 +228,9 @@ export async function connectToDeviceById(bleId: string) {
 
     console.log("[BLE] Connected via QR");
     emitConnectionState('connected');
+    
+    // Auto-resend any pending messages
+    resendPendingMessages();
 
     if (disconnectSubscription) {
       disconnectSubscription.remove();
@@ -228,7 +240,13 @@ export async function connectToDeviceById(bleId: string) {
 
     return true;
   } catch (e) {
-    console.error("[BLE] Direct connect failed:", e);
+    if (retryCount < 2) { // 3 total attempts
+      console.warn(`[BLE] Connection attempt ${retryCount + 1} failed. Retrying...`);
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(connectToDeviceById(bleId, retryCount + 1)), 2000);
+      });
+    }
+    console.error("[BLE] Direct connect failed after 3 attempts:", e);
     emitConnectionState('disconnected');
     startScanAndConnect();
     return false;

@@ -1,6 +1,6 @@
 import { saveMessage, updateMessageStatus } from '../../chat/msg/chatStore';
 import type { MeshPacket } from '../mesh/packet';
-import { onBLEMessage, sendBLE } from './bleTransport';
+import { onBLEMessage, sendBLE, isConnected } from './bleTransport';
 
 let listeners: ((packet: MeshPacket) => void)[] = [];
 
@@ -36,11 +36,20 @@ interface PendingMessage {
 }
 
 const pendingQueue = new Map<string, PendingMessage>();
+const receivedMessageIds = new Set<string>();
+
+export function resendPendingMessages() {
+  console.log(`[bleMessaging] Resending ${pendingQueue.size} pending messages after reconnect`);
+  for (const [id, pending] of pendingQueue.entries()) {
+    clearTimeout(pending.timer); // Clear old timer
+    sendMessageReliable(pending.packet, pending.retries);
+  }
+}
 
 /**
  * Send message via real BLE transport with reliability (ACK + Retry)
  */
-export async function sendMessageReliable(packet: MeshPacket): Promise<boolean> {
+export async function sendMessageReliable(packet: MeshPacket, initialRetries = 0): Promise<boolean> {
   return new Promise((resolve) => {
     const attemptSend = async (retries: number) => {
       try {
@@ -52,16 +61,30 @@ export async function sendMessageReliable(packet: MeshPacket): Promise<boolean> 
           console.error('[bleMessaging] Failed to send via BLE directly.');
           if (retries >= MAX_RETRIES) {
              await updateMessageStatus(packet.id, 'failed').catch(() => {});
+             pendingQueue.delete(packet.id);
              resolve(false);
           } else {
+             if (!isConnected()) {
+               console.warn(`[bleMessaging] Pausing retry for ${packet.id} due to disconnect`);
+               // Just keep it in queue without timer, will be picked up by resendPendingMessages
+               pendingQueue.set(packet.id, { packet, retries: retries + 1, timer: setTimeout(() => {}, 0) });
+               return;
+             }
              const timer = setTimeout(() => attemptSend(retries + 1), PENDING_TIMEOUT);
              pendingQueue.set(packet.id, { packet, retries: retries + 1, timer });
           }
           return;
         }
 
+        // Initially marked as sent
+        await updateMessageStatus(packet.id, 'sent').catch(() => {});
+
         // Successfully written to BLE, wait for ACK
         const timer = setTimeout(() => {
+          if (!isConnected()) {
+             console.warn(`[bleMessaging] Pausing ACK timeout for ${packet.id} due to disconnect`);
+             return; // Will be picked up by resendPendingMessages
+          }
           console.warn(`[bleMessaging] ACK timeout for ${packet.id}`);
           if (retries >= MAX_RETRIES) {
             console.error(`[bleMessaging] Max retries reached for ${packet.id}. Failing.`);
@@ -81,7 +104,7 @@ export async function sendMessageReliable(packet: MeshPacket): Promise<boolean> 
       }
     };
 
-    attemptSend(0);
+    attemptSend(initialRetries);
     // Resolve true immediately as it is successfully queued
     resolve(true);
   });
@@ -135,6 +158,32 @@ async function handleIncomingMessage(packet: MeshPacket): Promise<void> {
       }
       emitMessage(packet);
       return;
+    }
+
+    // Deduplication check
+    if (receivedMessageIds.has(packet.id)) {
+      console.log(`[bleMessaging] Ignoring duplicate message ${packet.id}`);
+      if (packet.type !== 'ACK') {
+        // Send ACK back in case peer missed it
+        const ackPacket: MeshPacket = {
+          id: `ack_${packet.id}`,
+          from: packet.to,
+          to: packet.from,
+          ttl: 4,
+          timestamp: Date.now(),
+          type: 'ACK',
+          payload: { messageId: packet.id },
+        };
+        await sendMessageBLE(ackPacket);
+      }
+      return;
+    }
+    
+    receivedMessageIds.add(packet.id);
+    if (receivedMessageIds.size > 1000) {
+       const ids = Array.from(receivedMessageIds).slice(-500);
+       receivedMessageIds.clear();
+       ids.forEach(id => receivedMessageIds.add(id));
     }
 
     // Save received message

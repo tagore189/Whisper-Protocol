@@ -74,12 +74,12 @@ export function processChunk(chunk: string): string | null {
 function cleanupPending() {
   const now = Date.now();
   for (const [id, p] of pendingMessages.entries()) {
-    if (now - p.lastSeen > 30000) {
-       console.log(`[bleChunker] Dropping incomplete message ${id}`);
+    if (now - p.lastSeen > 10000) { // 10 seconds timeout
+       console.log(`[bleChunker] Dropping incomplete message ${id} (missing chunks)`);
        pendingMessages.delete(id);
     }
   }
 }
 
-// Active cleanup every 10s
-setInterval(cleanupPending, 10000);
+// Active cleanup every 5s
+setInterval(cleanupPending, 5000);
