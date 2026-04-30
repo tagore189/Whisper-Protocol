@@ -49,6 +49,7 @@ type BleConnectionContextValue = {
   setActivePeer: (peer: ActivePeer) => void;
   deviceNameMap: Record<string, string>;
   bleToAppMap: Record<string, string>;
+  pingDevice: (bleDeviceId: string) => Promise<void>;
 };
 
 const BleConnectionContext = createContext<BleConnectionContextValue | null>(null);
@@ -344,6 +345,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
 
   const connectDirectlySkipHandshake = useCallback(
     (device: { id: string; name: string; advertisedName: string; serviceUUID: string; sessionToken: string; timestamp: number }) => {
+      // ... existing code ...
       return new Promise<{peerId: string; peerName: string}>(async (resolve, reject) => {
         if (!settings.deviceId) return reject(new Error('Identity unavailable'));
 
@@ -434,7 +436,64 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
     [settings.deviceId, settings.deviceName, clearPeerTimer, setPeerState]
   );
 
+  const pingDevice = useCallback((bleDeviceId: string) => {
+    return new Promise<void>(async (resolve) => {
+      if (!settings.deviceId) return resolve();
 
+      try {
+        console.log('[identity] Pinging device:', bleDeviceId);
+        // Connect physically but do not update handshake state
+        const ok = await connectToDeviceById(bleDeviceId);
+        if (!ok) return resolve();
+
+        const requestId = Crypto.randomUUID();
+        const pingPacket: MeshPacket = {
+          id: Crypto.randomUUID(),
+          from: settings.deviceId,
+          to: '*',
+          ttl: 4,
+          timestamp: Date.now(),
+          type: 'identity_ping',
+          payload: { requestId }
+        };
+
+        let resolved = false;
+
+        const unsubscribe = onMessageReceived((response) => {
+          if (resolved) return;
+          if (response.type === 'identity_response' && response.payload?.requestId === requestId) {
+            resolved = true;
+            unsubscribe();
+            clearTimeout(timeoutId);
+            
+            const peerAppId = response.from;
+            const peerName = response.payload?.deviceName;
+
+            if (peerName) {
+              setDeviceNameMap(prev => ({ ...prev, [peerAppId]: peerName }));
+            }
+            setBleToAppMap(prev => ({ ...prev, [bleDeviceId]: peerAppId }));
+            
+            console.log('[identity] Ping successful for:', peerName);
+            resolve();
+          }
+        });
+
+        const timeoutId = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            unsubscribe();
+            console.log('[identity] Ping timed out for:', bleDeviceId);
+            resolve();
+          }
+        }, 8000);
+
+        await sendMessageBLE(pingPacket);
+      } catch (e) {
+        resolve();
+      }
+    });
+  }, [settings.deviceId]);
 
   const removeConnected = useCallback(
     (deviceId: string) => {
@@ -547,6 +606,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         setActivePeer,
         deviceNameMap,
         bleToAppMap,
+        pingDevice,
       }}
     >
       {children}
@@ -576,6 +636,7 @@ export function useBleConnections(): BleConnectionContextValue {
       setActivePeer: () => {},
       deviceNameMap: {},
       bleToAppMap: {},
+      pingDevice: async () => {},
     };
   }
   return ctx;

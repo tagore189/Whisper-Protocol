@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons, MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -52,7 +52,8 @@ export default function DeviceDiscoveryScreen() {
   const isWeb = Platform.OS === "web";
   const { devices, isScanning, error, startScan, stopScan } = useBleScan();
   const { settings: appSettings } = useAppSettings();
-  const { requestConnectionFromScan, getConnectionState, deviceNameMap, bleToAppMap } = useBleConnections();
+  const { requestConnectionFromScan, getConnectionState, deviceNameMap, bleToAppMap, pingDevice } = useBleConnections();
+  const pingingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isWeb) {
@@ -73,6 +74,16 @@ export default function DeviceDiscoveryScreen() {
     () => [...devices].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)),
     [devices]
   );
+
+  useEffect(() => {
+    sortedDevices.forEach(device => {
+      const appId = bleToAppMap[device.id];
+      if (!appId && !pingingRef.current.has(device.id)) {
+        pingingRef.current.add(device.id);
+        pingDevice(device.id).catch(() => {});
+      }
+    });
+  }, [sortedDevices, bleToAppMap, pingDevice]);
 
   const handleScanPress = useCallback(() => {
     if (isScanning) {

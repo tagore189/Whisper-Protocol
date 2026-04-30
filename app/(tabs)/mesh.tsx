@@ -1,6 +1,6 @@
 import { MaterialIcons } from '@expo/vector-icons';
 import { type Href, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useBleConnections } from '../../src/connection/BleConnectionContext';
 import { useBleScan } from '../../src/discovery/ble/useBleScan';
@@ -31,7 +31,8 @@ function timeAgo(ts: number): string {
 export default function MeshVisualizationScreen() {
   const router = useRouter();
   const [myId, setMyId] = useState<string>('');
-  const { canOpenChat, setActivePeer, deviceNameMap, bleToAppMap } = useBleConnections();
+  const { canOpenChat, setActivePeer, deviceNameMap, bleToAppMap, pingDevice } = useBleConnections();
+  const pingingRef = useRef<Set<string>>(new Set());
 
   // Use the robust scanner hook
   const { devices: nodes, isScanning: scanning, error: scanError, startScan, stopScan } = useBleScan();
@@ -58,6 +59,16 @@ export default function MeshVisualizationScreen() {
     () => [...nodes].sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)),
     [nodes]
   );
+
+  useEffect(() => {
+    sortedNodes.forEach(node => {
+      const appId = bleToAppMap[node.id];
+      if (!appId && !pingingRef.current.has(node.id)) {
+        pingingRef.current.add(node.id);
+        pingDevice(node.id).catch(() => {});
+      }
+    });
+  }, [sortedNodes, bleToAppMap, pingDevice]);
 
   const onConnect = useCallback(
     (peerId: string) => {
