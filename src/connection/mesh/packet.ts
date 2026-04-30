@@ -1,4 +1,4 @@
-export type PacketType = 'TEXT' | 'VOICE_START' | 'VOICE_END' | 'ULTRASONIC' | 'ACK' | 'HANDSHAKE' | 'connection_request' | 'connection_accepted' | 'connection_rejected' | 'connection_ready' | 'message';
+export type PacketType = 'TEXT' | 'VOICE_START' | 'VOICE_END' | 'ULTRASONIC' | 'ACK' | 'HANDSHAKE' | 'connection_request' | 'connection_accepted' | 'connection_rejected' | 'connection_ready' | 'message' | 'identity_ping' | 'identity_response';
 
 export interface MeshPacket<T = any> {
   id: string;

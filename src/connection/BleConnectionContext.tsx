@@ -47,6 +47,7 @@ type BleConnectionContextValue = {
   globalBleState: string;
   activePeer: ActivePeer;
   setActivePeer: (peer: ActivePeer) => void;
+  deviceNameMap: Record<string, string>;
 };
 
 const BleConnectionContext = createContext<BleConnectionContextValue | null>(null);
@@ -64,6 +65,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
   const [globalBleState, setGlobalBleState] = useState<string>('disconnected');
   const [incomingRequest, setIncomingRequest] = useState<{ packet: MeshPacket; data: ConnectionRequestData } | null>(null);
   const [activePeer, setActivePeerState] = useState<ActivePeer>({ peerId: null, peerName: null });
+  const [deviceNameMap, setDeviceNameMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     AsyncStorage.getItem('activePeer').then(stored => {
@@ -153,6 +155,9 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
 
     if (packet.type === 'connection_request') {
       console.log(`[handshake] Incoming connection request from ${peerId}`);
+      if (packet.payload?.fromDeviceName) {
+        setDeviceNameMap(prev => ({ ...prev, [peerId]: packet.payload!.fromDeviceName }));
+      }
       setIncomingRequest({
         packet,
         data: {
@@ -165,6 +170,9 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
 
     if (packet.type === 'connection_accepted') {
       console.log(`[handshake] Connection accepted by ${peerId}`);
+      if (packet.payload?.fromDeviceName) {
+        setDeviceNameMap(prev => ({ ...prev, [peerId]: packet.payload!.fromDeviceName }));
+      }
       setPeerState(peerId, peerName, 'CONNECTED');
       setActivePeer({ peerId, peerName });
       return;
@@ -180,6 +188,32 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
       console.log(`[handshake] Connection fully ready for ${peerId}`);
       setPeerState(peerId, peerName, 'FULLY_CONNECTED');
       setActivePeer({ peerId, peerName });
+      return;
+    }
+
+    if (packet.type === 'identity_ping') {
+      console.log(`[identity] Responding to identity ping from ${peerId}`);
+      const responsePacket: MeshPacket = {
+        id: Crypto.randomUUID(),
+        from: settings.deviceId!,
+        to: peerId,
+        ttl: 4,
+        timestamp: Date.now(),
+        type: 'identity_response',
+        payload: {
+          deviceName: settings.deviceName || 'Unknown',
+          deviceId: settings.deviceId,
+        },
+      };
+      sendMessageBLE(responsePacket).catch(() => {});
+      return;
+    }
+
+    if (packet.type === 'identity_response') {
+      console.log(`[identity] Received identity response from ${peerId}: ${packet.payload?.deviceName}`);
+      if (packet.payload?.deviceName) {
+        setDeviceNameMap(prev => ({ ...prev, [peerId]: packet.payload!.deviceName }));
+      }
       return;
     }
 
@@ -507,6 +541,7 @@ export function BleConnectionProvider({ children }: { children: React.ReactNode 
         globalBleState,
         activePeer,
         setActivePeer,
+        deviceNameMap,
       }}
     >
       {children}
@@ -534,6 +569,7 @@ export function useBleConnections(): BleConnectionContextValue {
       globalBleState: 'disconnected',
       activePeer: { peerId: null, peerName: null },
       setActivePeer: () => {},
+      deviceNameMap: {},
     };
   }
   return ctx;

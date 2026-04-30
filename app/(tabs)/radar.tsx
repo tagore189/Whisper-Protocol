@@ -52,7 +52,7 @@ export default function DeviceDiscoveryScreen() {
   const isWeb = Platform.OS === "web";
   const { devices, isScanning, error, startScan, stopScan } = useBleScan();
   const { settings: appSettings } = useAppSettings();
-  const { requestConnectionFromScan, getConnectionState } = useBleConnections();
+  const { requestConnectionFromScan, getConnectionState, deviceNameMap } = useBleConnections();
 
   useEffect(() => {
     if (!isWeb) {
@@ -193,7 +193,7 @@ export default function DeviceDiscoveryScreen() {
           )}
 
           {sortedDevices.map((device) => {
-            const displayName = getDisplayName(device as any);
+            const displayName = deviceNameMap[device.id] || device.name || (device as any).localName || `Nearby Device (${device.id.slice(-4)})`;
             return (
               <DeviceCard
                 key={device.id}
