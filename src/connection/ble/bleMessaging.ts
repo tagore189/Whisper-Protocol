@@ -7,9 +7,13 @@ let listeners: ((packet: MeshPacket) => void)[] = [];
 /**
  * Register a listener for incoming messages
  */
-export function onMessageReceived(cb: (packet: MeshPacket) => void) {
+export function onMessageReceived(cb: (packet: MeshPacket) => void): () => void {
   listeners.push(cb);
   console.log(`[bleMessaging] Registered listener, total: ${listeners.length}`);
+  return () => {
+    listeners = listeners.filter((l) => l !== cb);
+    console.log(`[bleMessaging] Unregistered listener, total: ${listeners.length}`);
+  };
 }
 
 /**

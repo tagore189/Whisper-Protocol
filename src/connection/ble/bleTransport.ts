@@ -614,5 +614,9 @@ export async function disconnectBLE(): Promise<boolean> {
 }
 
 export function isConnected(): boolean {
-  return connectedDevice !== null || isServerRunning;
+  return connectedDevice !== null;
+}
+
+export function isAdvertising(): boolean {
+  return isServerRunning;
 }

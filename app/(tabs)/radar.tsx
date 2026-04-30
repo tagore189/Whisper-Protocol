@@ -51,7 +51,7 @@ export default function DeviceDiscoveryScreen() {
   const isWeb = Platform.OS === "web";
   const { devices, isScanning, error, startScan, stopScan } = useBleScan();
   const { settings: appSettings } = useAppSettings();
-  const { beginHandshake, getConnectionState } = useBleConnections();
+  const { requestConnectionFromScan, getConnectionState } = useBleConnections();
 
   useEffect(() => {
     if (!isWeb) {
@@ -83,10 +83,11 @@ export default function DeviceDiscoveryScreen() {
 
   const sendConnectionRequest = async (device: { id: string; name: string }) => {
     try {
-      await beginHandshake(device);
-      Alert.alert("HELLO sent", "Waiting for ACK from the other device.");
+      await requestConnectionFromScan(device);
+      Alert.alert("Connected", "Connection accepted. You can now chat.");
+      router.push(`/chatroom?peerId=${encodeURIComponent(device.id)}&peerName=${encodeURIComponent(device.name)}` as any);
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Could not start handshake.");
+      Alert.alert("Connection Failed", e?.message || "Could not connect to device.");
     }
   };
 

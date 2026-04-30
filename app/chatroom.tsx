@@ -141,10 +141,10 @@ export default function ChatRoomScreen() {
       await refreshMessages();
     };
 
-    onMessageReceived(handleIncoming);
+    const unsubscribe = onMessageReceived(handleIncoming);
 
     return () => {
-      // Cleanup: remove listener (simplified - in production use a proper event emitter)
+      unsubscribe();
     };
   }, [peerId, myId, refreshMessages]);
 
