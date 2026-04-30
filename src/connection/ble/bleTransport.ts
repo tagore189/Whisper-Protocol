@@ -11,6 +11,8 @@ export const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
 export const CHARACTERISTIC_UUID = 'abcd1234-5678-1234-5678-abcdef123456';
 export const DEVICE_NAME = 'FL';
 
+let activeServiceUUID = SERVICE_UUID;
+
 // BLE Manager instance
 let bleManager: BleManager | null = null;
 export let connectedDevice: Device | null = null;
@@ -476,6 +478,9 @@ export async function connectViaQRPayload(payload: {
   if (disconnectSubscription) disconnectSubscription.remove();
   disconnectSubscription = manager.onDeviceDisconnected(targetBleId, (err) => handleDisconnect(err, targetBleId!));
 
+  // Update active UUID for this session
+  activeServiceUUID = payload.serviceUUID;
+
   // 9. Monitor + emit
   startMonitoring();
   emitConnectionState('connected');
@@ -493,7 +498,7 @@ function startMonitoring(): void {
 
   monitorUnsubscribe = bleManager.monitorCharacteristicForDevice(
     connectedDevice.id,
-    SERVICE_UUID,
+    activeServiceUUID,
     CHARACTERISTIC_UUID,
     (error, characteristic) => {
       if (error) return;
@@ -554,7 +559,7 @@ async function doSendBLE(data: string): Promise<boolean> {
         const encoded = Buffer.from(chunk, 'utf8').toString('base64');
         await bleManager.writeCharacteristicWithResponseForDevice(
           connectedDevice.id,
-          SERVICE_UUID,
+          activeServiceUUID,
           CHARACTERISTIC_UUID,
           encoded
         );
@@ -568,7 +573,7 @@ async function doSendBLE(data: string): Promise<boolean> {
     if (!chunkSuccess && isServerRunning) {
       try {
          const bytes = Array.from(Buffer.from(chunk, 'utf8'));
-         await BLEPeripheral.sendNotificationToDevices(SERVICE_UUID, CHARACTERISTIC_UUID, bytes);
+         await BLEPeripheral.sendNotificationToDevices(activeServiceUUID, CHARACTERISTIC_UUID, bytes);
          chunkSuccess = true;
       } catch (e) {
          console.warn('[bleTransport] Chunk send failed (Peripheral):', e);
